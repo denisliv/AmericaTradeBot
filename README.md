@@ -56,7 +56,7 @@ AmericaTrade/
 ### 1. Клонирование репозитория
 
 ```bash
-git clone <repository-url>
+git clone git@github.com:denisliv/AmericaTradeBot.git
 cd AmericaTrade
 ```
 
@@ -240,7 +240,7 @@ python main.py
 
 ## 🚀 Развертывание
 
-### Docker (рекомендуется)
+### Docker
 
 ```bash
 # Создание образа
@@ -249,64 +249,3 @@ docker build -t americatrade-bot .
 # Запуск контейнера
 docker run -d --name americatrade-bot --env-file .env americatrade-bot
 ```
-
-### Системный сервис
-
-Создайте systemd сервис для автоматического запуска:
-
-```ini
-[Unit]
-Description=AmericaTrade Telegram Bot
-After=network.target
-
-[Service]
-Type=simple
-User=your-user
-WorkingDirectory=/path/to/AmericaTrade
-ExecStart=/path/to/AmericaTrade/.venv/bin/python main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## 🤝 Разработка
-
-### Структура кода
-
-- **Чистая архитектура** - Разделение на слои
-- **Dependency Injection** - Внедрение зависимостей
-- **Type Hints** - Типизация для лучшей читаемости
-- **Async/Await** - Асинхронное программирование
-
-### Добавление новых функций
-
-1. Создайте новый handler в `app/bot/handlers/`
-2. Добавьте роутер в `app/bot/bot.py`
-3. Обновите клавиатуры в `app/bot/keyboards/`
-4. Добавьте тексты в `app/lexicon/lexicon_ru.py`
-
-## 📝 Лицензия
-
-Этот проект является собственностью компании AmericaTrade.
-
-## 📞 Поддержка
-
-Для получения поддержки обращайтесь:
-- Email: info@americatrade.by
-- Telegram: @americatradeby
-- Телефон: +375 44 723-24-25
-
-## 🔄 Обновления
-
-Следите за обновлениями в репозитории. Перед обновлением:
-1. Сделайте резервную копию базы данных
-2. Остановите бота
-3. Обновите код
-4. Запустите миграции (если есть)
-5. Перезапустите бота
-
----
-
-**AmericaTrade** - Ваш надежный партнер в покупке автомобилей из США! 🇺🇸🚗
