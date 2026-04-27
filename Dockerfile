@@ -2,7 +2,8 @@ FROM python:3.13-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
