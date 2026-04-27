@@ -24,7 +24,8 @@ from app.bot.middlewares.shadow_ban import ShadowBanMiddleware
 from app.bot.middlewares.throttling import ThrottlingMiddleware
 from app.bot.scheduler import create_scheduler
 from app.infrastructure.database.connection import get_pg_pool
-from app.infrastructure.services.llm_service import LLMService
+from app.infrastructure.database.db import ensure_metrics_tables
+from app.infrastructure.services.ai_manager.service import AIManagerService
 from config.config import Config
 
 logger = logging.getLogger(__name__)
@@ -47,19 +48,15 @@ async def main(config: Config) -> None:
 
     # Создаем отдельный Redis клиент для промо-рассылок
     redis = Redis(
-        db=config.redis.db + 1,  # Используем другую базу данных
+        db=config.redis.promo_db,
         host=config.redis.host,
         port=config.redis.port,
         username=config.redis.username,
         password=config.redis.password,
     )
 
-    # Инициализируем LLM сервис
-    llm_service = LLMService(
-        api_key=config.openai.api_key,
-        base_url=config.openai.base_url,
-        model_name=config.openai.model_name,
-    )
+    # Инициализируем AI-менеджер
+    ai_manager_service = AIManagerService(config)
 
     # Инициализируем бот и диспетчер
     bot = Bot(
@@ -76,6 +73,8 @@ async def main(config: Config) -> None:
         user=config.db.user,
         password=config.db.password,
     )
+    async with db_pool.connection() as conn:
+        await ensure_metrics_tables(conn)
 
     # Создаем и настраиваем планировщик
     scheduler_manager = create_scheduler(config, bot, db_pool, redis)
@@ -89,8 +88,8 @@ async def main(config: Config) -> None:
         assisted_selection_router,
         consultation_request_router,
         subscriptions_router,
-        llm_chat_router,
         admin_router,
+        llm_chat_router,
         others_router,
     )
 
@@ -107,7 +106,8 @@ async def main(config: Config) -> None:
     )
 
     # Регистрируем зависимости
-    dp["llm_service"] = llm_service
+    dp["ai_manager_service"] = ai_manager_service
+    dp["config"] = config
 
     # Запускаем поллинг
     try:

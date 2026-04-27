@@ -31,6 +31,8 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.cursor
+graphify-out/
 
 # IDE and editors
 .vscode/
@@ -52,6 +54,16 @@ Thumbs.db
 .redis_data/
 .postgres_data/
 .pgadmin_data/
+
+# Local vector indexes
+data/vectorstore/
+
+# Content supplied per environment (dirs kept via .gitkeep)
+data/salesdata.csv
+data/posts/*
+!data/posts/.gitkeep
+data/ai_manager/*
+!data/ai_manager/.gitkeep
 
 # Logs
 *.log
@@ -105,3 +117,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+*.jpeg
+*.jpg

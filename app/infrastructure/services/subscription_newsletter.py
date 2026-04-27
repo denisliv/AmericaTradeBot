@@ -10,12 +10,9 @@ from psycopg_pool import AsyncConnectionPool
 from app.infrastructure.database.db import (
     get_active_subscribers,
     get_user_subscriptions,
+    record_delivery_metric,
 )
-from app.infrastructure.services.utils import (
-    get_assisted_data,
-    get_data,
-    make_media_group,
-)
+from app.infrastructure.services.utils import get_data, make_media_group
 from app.lexicon.lexicon_ru import LEXICON_NEWSLETTER_RU, LEXICON_RU
 
 logger = logging.getLogger(__name__)
@@ -27,74 +24,6 @@ async def send_self_selection_cars(
     cars_data: List[Tuple[dict, List[str]]],
 ) -> int:
     """Отправляет автомобили для self selection подписки с фото и кнопками"""
-    if not cars_data:
-        await bot.send_message(
-            chat_id=subscriber.user_id,
-            text=f"{LEXICON_RU['nothing_found_text']}",
-        )
-        return 0
-
-    messages_sent = 0
-    successful_cars = []
-
-    # Отправляем все media_group для автомобилей
-    for i, (car, images) in enumerate(cars_data, 1):
-        try:
-            # Проверяем, что у автомобиля есть изображения
-            if not images:
-                logger.warning(f"No images for car {i}, skipping")
-                continue
-
-            # Создаем media group с фото
-            media_group = await make_media_group(
-                (car, images), subscriber.name or "Пользователь", i
-            )
-
-            # Отправляем фото
-            await bot.send_media_group(chat_id=subscriber.user_id, media=media_group)
-            successful_cars.append((i, car))
-            messages_sent += 1
-            await asyncio.sleep(0.5)  # пауза между автомобилями
-
-        except Exception as e:
-            logger.error(f"Error sending car {i} to user {subscriber.user_id}: {e}")
-            logger.error(f"Car data: {car}")
-            logger.error(f"Images: {images}")
-            continue
-
-    # Отправляем одно сообщение с кнопками для всех успешно отправленных автомобилей
-    if successful_cars:
-        # Создаем кнопки для всех автомобилей
-        keyboard_buttons = []
-        for i, car in successful_cars:
-            keyboard_buttons.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"Авто № {i}",
-                        callback_data=f"Лот №: {car.get('Lot number', 'N/A')}-{car.get('Make', 'N/A')}-{car.get('Model Detail', 'N/A')}",
-                    )
-                ]
-            )
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-
-        # Отправляем сообщение с кнопками
-        await bot.send_message(
-            chat_id=subscriber.user_id,
-            text=LEXICON_NEWSLETTER_RU["car_selection_text"],
-            reply_markup=keyboard,
-        )
-        messages_sent += 1
-
-    return messages_sent
-
-
-async def send_assisted_selection_cars(
-    bot: Bot,
-    subscriber,
-    cars_data: List[Tuple[dict, List[str]]],
-) -> int:
-    """Отправляет автомобили для assisted selection подписки с фото и кнопками"""
     if not cars_data:
         await bot.send_message(
             chat_id=subscriber.user_id,
@@ -173,19 +102,6 @@ async def get_cars_for_self_selection(
     return cars_data
 
 
-async def get_cars_for_assisted_selection(
-    subscription,
-) -> List[Tuple[dict, List[str]]]:
-    """Получает автомобили для assisted selection подписки"""
-    user_dict = {
-        "body_style": subscription.body_style,
-        "budget": subscription.budget,
-    }
-
-    cars_data = await get_assisted_data(user_dict, count=3)
-    return cars_data
-
-
 class NewsletterQueue:
     """Очередь для рассылки с поддержкой retry и rate limiting"""
 
@@ -239,6 +155,63 @@ class NewsletterQueue:
         return self._total_items == 0
 
 
+async def process_newsletter_batch(
+    bot: Bot,
+    conn,
+    queue: NewsletterQueue,
+    batch: List[Tuple],
+) -> None:
+    """Параллельно обрабатывает батч подписчиков и планирует retry."""
+
+    async def _record(
+        status: str, subscriber_user_id: int, error_msg: str = ""
+    ) -> None:
+        if conn is None:
+            return
+        await record_delivery_metric(
+            conn,
+            category="subscription_newsletter",
+            status=status,
+            user_id=subscriber_user_id,
+            error_text=error_msg or None,
+        )
+
+    results = await asyncio.gather(
+        *(send_newsletter_to_user(bot, subscriber, conn) for subscriber, _ in batch),
+        return_exceptions=True,
+    )
+    for (subscriber, retry_count), result in zip(batch, results, strict=True):
+        if isinstance(result, Exception):
+            await queue.add_retry(subscriber, retry_count)
+            logger.warning(
+                "Unexpected exception for user %s: %s",
+                subscriber.user_id,
+                result,
+            )
+            continue
+        success, error_msg = result
+        if success:
+            logger.debug("Newsletter sent to user %s", subscriber.user_id)
+            await _record("sent", subscriber.user_id)
+            continue
+        if "blocked" in error_msg or "deactivated" in error_msg:
+            logger.warning("User %s blocked bot or deactivated", subscriber.user_id)
+            await _record(
+                "blocked" if "blocked" in error_msg else "deactivated",
+                subscriber.user_id,
+                error_msg,
+            )
+            continue
+        await queue.add_retry(subscriber, retry_count)
+        await _record("failed", subscriber.user_id, error_msg)
+        await _record("retried", subscriber.user_id, error_msg)
+        logger.warning(
+            "Failed to send newsletter to user %s: %s",
+            subscriber.user_id,
+            error_msg,
+        )
+
+
 async def send_newsletter_to_user(bot: Bot, subscriber, conn) -> tuple[bool, str]:
     """
     Отправляет рассылку пользователю с данными об автомобилях
@@ -248,7 +221,7 @@ async def send_newsletter_to_user(bot: Bot, subscriber, conn) -> tuple[bool, str
     """
     try:
         # Получаем подписки пользователя
-        self_selection_subs, assisted_selection_subs = await get_user_subscriptions(
+        self_selection_subs = await get_user_subscriptions(
             conn, user_id=subscriber.user_id
         )
 
@@ -258,13 +231,6 @@ async def send_newsletter_to_user(bot: Bot, subscriber, conn) -> tuple[bool, str
         for subscription in self_selection_subs:
             cars_data = await get_cars_for_self_selection(subscription)
             messages_sent += await send_self_selection_cars(bot, subscriber, cars_data)
-
-        # Обрабатываем assisted selection подписки
-        for subscription in assisted_selection_subs:
-            cars_data = await get_cars_for_assisted_selection(subscription)
-            messages_sent += await send_assisted_selection_cars(
-                bot, subscriber, cars_data
-            )
 
         logger.debug(f"Sent {messages_sent} messages to user {subscriber.user_id}")
         return True, ""
@@ -332,29 +298,7 @@ async def send_daily_newsletter(bot: Bot, db_pool: AsyncConnectionPool) -> None:
 
                 logger.info(f"Processing batch of {len(batch)} subscribers")
 
-                # Отправляем сообщения в батче параллельно
-                tasks = []
-                for subscriber, retry_count in batch:
-                    task = send_newsletter_to_user(bot, subscriber, conn)
-                    tasks.append((task, subscriber, retry_count))
-
-                # Ждем завершения всех задач в батче
-                for task, subscriber, retry_count in tasks:
-                    success, error_msg = await task
-
-                    if success:
-                        logger.debug(f"Newsletter sent to user {subscriber.user_id}")
-                    else:
-                        if "blocked" in error_msg or "deactivated" in error_msg:
-                            logger.warning(
-                                f"User {subscriber.user_id} blocked bot or deactivated"
-                            )
-                        else:
-                            # Добавляем в очередь для повторной отправки
-                            await queue.add_retry(subscriber, retry_count)
-                            logger.warning(
-                                f"Failed to send newsletter to user {subscriber.user_id}: {error_msg}"
-                            )
+                await process_newsletter_batch(bot, conn, queue, batch)
 
                 # Пауза между батчами для соблюдения rate limits
                 if not queue.is_empty():

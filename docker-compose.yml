@@ -1,0 +1,58 @@
+# AmericaTrade: PostgreSQL + Redis + Telegram-бот
+# 1) Скопируйте env.example в .env и задайте секреты (BOT_TOKEN, API_KEY, пароли).
+# 2) Для Docker выставьте POSTGRES_HOST=postgres, REDIS_HOST=redis (см. env.example).
+# 3) Первый запуск: применить миграции, затем поднять стек:
+#    docker compose run --rm bot python migrations/create_tables.py
+#    docker compose up -d
+#
+name: americatrade
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  bot:
+    build: .
+    env_file: .env
+    environment:
+      # Явно перебиваем localhost из локального .env при деплое через compose
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Кэш FAISS (RAG) и обновляемые данные без пересборки образа
+      - ai_data:/app/data/vectorstore/ai_manager
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  ai_data:

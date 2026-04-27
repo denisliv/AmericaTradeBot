@@ -19,4 +19,4 @@ async def call_request_answer(message: Message):
 # не предусмотренные логикой работы бота
 @others_router.message()
 async def other_fsm_answer(message: Message):
-    await message.delete()
+    await message.answer(text=LEXICON_RU["unknown_message_hint_text"])

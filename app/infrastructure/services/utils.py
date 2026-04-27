@@ -1,7 +1,9 @@
 import asyncio
 import csv
 import logging
+import os
 import random
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import aiofiles
@@ -16,6 +18,23 @@ from app.lexicon.lexicon_ru import LEXICON_CAPTION_RU, LEXICON_EN_RU, LEXICON_RU
 # Логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+REQUIRED_SALESDATA_COLUMNS = (
+    "Make",
+    "Model Group",
+    "Model Detail",
+    "Year",
+    "Odometer",
+    "Sale Date M/D/CY",
+    "Buy-It-Now Price",
+    "Lot number",
+    "Color",
+    "Engine",
+    "Drive",
+    "Transmission",
+    "Fuel Type",
+    "Image URL",
+)
 
 
 # Универсальная функция запроса JSON
@@ -58,9 +77,10 @@ async def get_images(
 # Базовый фильтр по марке/модели/году
 def filter_by_make_and_model(row: dict, brand: str, model: str, year: tuple) -> bool:
     try:
+        model_matches = model == "ALL MODELS" or row["Model Group"] == model
         return (
             row["Make"] == brand
-            and row["Model Group"] == model
+            and model_matches
             and year[0] <= int(row["Year"]) <= year[1]
             and row["Sale Date M/D/CY"] != "0"
         )
@@ -199,95 +219,40 @@ async def get_data(user_dict: dict, count: int = 6) -> List[Tuple[dict, List[str
     return cars[:count]
 
 
-# Фильтр по кузову и бюджету
-def match_assisted_car(
-    row: dict,
-    body_style: str,
-    budget: tuple,
-) -> bool:
-    try:
-        # Проверяем кузов (используем поле Body Style)
-        body_style = row.get("Body Style", "").upper()
-        body_style_upper = body_style.upper()
-
-        # Маппинг кузовов
-        body_mapping = {
-            "SEDAN": ["SEDAN", "4 DOOR", "COUPE", "HATCHBACK"],
-            "SUV": ["SUV", "CROSSOVER", "4X4", "WAGON", "PICKUP"],
-            "ELECTRIC": ["ELECTRIC", "EV", "HYBRID"],
-        }
-
-        # Проверяем соответствие кузова
-        if body_style_upper in body_mapping:
-            allowed_bodies = body_mapping[body_style_upper]
-            if not any(body in body_style for body in allowed_bodies):
-                return False
-        else:
-            # Если кузов не найден в маппинге, проверяем точное совпадение
-            if body_style_upper not in body_style:
-                return False
-
-        # Проверяем бюджет (используем поле Est. Retail Value или Buy-It-Now Price)
-        retail_value = float(row.get("Est. Retail Value", 0) or 0)
-        buy_now_price = float(row.get("Buy-It-Now Price", 0) or 0)
-
-        # Используем минимальную цену из двух
-        price = min(retail_value, buy_now_price) if buy_now_price > 0 else retail_value
-
-        if not (budget[0] <= price <= budget[1]):
-            return False
-
-        # Проверяем, что есть дата продажи
-        if row["Sale Date M/D/CY"] == "0":
-            return False
-
-        return True
-    except (ValueError, KeyError):
-        return False
-
-
-# Получение данных по кузову и бюджету
-async def get_assisted_data(
-    user_dict: dict, count: int = 3
-) -> List[Tuple[dict, List[str]]]:
-    body_style = LEXICON_RU_CSV[user_dict["body_style"]]
-    budget = LEXICON_RU_CSV[user_dict["budget"]]
-
-    # Читаем CSV асинхронно
-    async with aiofiles.open(
-        "data/salesdata.csv", mode="r", encoding="utf-8"
-    ) as csvfile:
-        csv_lines = await csvfile.readlines()
-
-    reader = csv.DictReader(csv_lines)
-    filtered = [row for row in reader if match_assisted_car(row, body_style, budget)]
-
-    if not filtered:
-        return []
-
-    # Сортируем по цене (от дешевых к дорогим)
-    filtered.sort(
-        key=lambda x: min(
-            float(x.get("Est. Retail Value", 0) or 0),
-            float(x.get("Buy-It-Now Price", 0) or 0),
-        )
-        if float(x.get("Buy-It-Now Price", 0) or 0) > 0
-        else float(x.get("Est. Retail Value", 0) or 0)
-    )
-    selected = filtered[:count]
-
-    # Параллельная загрузка картинок
-    async with aiohttp.ClientSession() as aio_session:
-        images_results = await asyncio.gather(
-            *(get_images(row, aio_session) for row in selected)
-        )
-
-    # Возвращаем только те, у которых есть картинки
-    cars = [(row, imgs) for row, imgs in zip(selected, images_results) if imgs]
-    return cars[:count]
-
-
 # Функция загрузки данных в csv
+def _validate_sales_csv_bytes(content: bytes) -> None:
+    if not content.strip():
+        raise ValueError("Downloaded CSV is empty")
+
+    text = content.decode("utf-8-sig")
+    reader = csv.reader(text.splitlines())
+    try:
+        header = next(reader)
+    except StopIteration as exc:
+        raise ValueError("Downloaded CSV is empty") from exc
+
+    columns = {column.strip().strip('"') for column in header}
+    missing = [column for column in REQUIRED_SALESDATA_COLUMNS if column not in columns]
+    if missing:
+        raise ValueError(f"Downloaded CSV missing required columns: {missing}")
+
+    if next(reader, None) is None:
+        raise ValueError("Downloaded CSV has no data rows")
+
+
+async def _write_sales_csv_atomically(filepath: str | Path, content: bytes) -> None:
+    target = Path(filepath)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target.with_name(f"{target.name}.tmp")
+    try:
+        async with aiofiles.open(tmp_path, "wb") as f:
+            await f.write(content)
+        os.replace(tmp_path, target)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
 async def download_csv(url: str) -> str:
     filepath = "data/salesdata.csv"
 
@@ -305,21 +270,19 @@ async def download_csv(url: str) -> str:
                             status=response.status,
                         )
 
-                    # Создаем директорию data если её нет
-                    import os
+                    chunks = []
+                    total_bytes = 0
+                    while chunk := await response.content.read(1024):
+                        chunks.append(chunk)
+                        total_bytes += len(chunk)
+                    content = b"".join(chunks)
+                    _validate_sales_csv_bytes(content)
+                    await _write_sales_csv_atomically(filepath, content)
 
-                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-                    async with aiofiles.open(filepath, "wb") as f:
-                        total_bytes = 0
-                        while chunk := await response.content.read(1024):
-                            await f.write(chunk)
-                            total_bytes += len(chunk)
-
-                        logger.info(
-                            f"Файл успешно загружен: {filepath} ({total_bytes} байт)"
-                        )
-                        return filepath
+                    logger.info(
+                        f"Файл успешно загружен: {filepath} ({total_bytes} байт)"
+                    )
+                    return filepath
 
     except asyncio.TimeoutError:
         logger.error(f"Таймаут при загрузке файла с {url}")

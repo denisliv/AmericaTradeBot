@@ -43,15 +43,7 @@ def get_main_menu_commands(role: UserRole):
                 description=LEXICON_COMMANDS_RU.get("/chat_description"),
             ),
             BotCommand(
-                command="/statistics",
-                description=LEXICON_COMMANDS_RU.get("/statistics_description"),
-            ),
-            BotCommand(
-                command="/ban",
-                description=LEXICON_COMMANDS_RU.get("/ban_description"),
-            ),
-            BotCommand(
-                command="/unban",
-                description=LEXICON_COMMANDS_RU.get("/unban_description"),
+                command="/admin",
+                description=LEXICON_COMMANDS_RU.get("/admin_description"),
             ),
         ]

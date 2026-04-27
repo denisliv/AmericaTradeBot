@@ -6,6 +6,10 @@ import sys
 from psycopg import AsyncConnection, Error
 
 from app.infrastructure.database.connection import get_pg_connection
+from app.infrastructure.database.schema import (
+    ASSISTED_SELECTION_DROP_SUBSCRIPTION_SQL,
+    METRICS_TABLES_SQL,
+)
 from config.config import Config, load_config
 
 config: Config = load_config()
@@ -75,13 +79,13 @@ async def main():
                                 user_id BIGINT REFERENCES users(user_id),
                                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                                 body_style VARCHAR(50),
-                                budget VARCHAR(50),
-                                subscription BOOLEAN NOT NULL DEFAULT FALSE
+                                budget VARCHAR(50)
                             );
                             CREATE UNIQUE INDEX IF NOT EXISTS idx_assisted_activity_user_day
                             ON assisted_selection_requests (user_id, created_at);
                         """
                     )
+                    await cursor.execute(query=ASSISTED_SELECTION_DROP_SUBSCRIPTION_SQL)
                     await cursor.execute(
                         query="""
                             CREATE TABLE IF NOT EXISTS chat_history(
@@ -106,6 +110,8 @@ async def main():
                             ON chat_history(created_at);
                         """
                     )
+                    for query in METRICS_TABLES_SQL:
+                        await cursor.execute(query=query)
                 logger.info("All tables were successfully created")
     except Error as db_error:
         logger.exception("Database-specific error: %s", db_error)

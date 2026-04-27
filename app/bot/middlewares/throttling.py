@@ -2,10 +2,14 @@ from typing import Any, Awaitable, Callable, Dict
 
 from aiogram import BaseMiddleware
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import TelegramObject
+from aiogram.types import Message, TelegramObject
 
 
 class ThrottlingMiddleware(BaseMiddleware):
+    """Ограничение частоты текстовых сообщений: cooldown между сообщениями (Redis NX + TTL)."""
+
+    COOLDOWN_SEC = 2
+
     def __init__(self, storage: RedisStorage, admin_ids: list) -> None:
         super().__init__()
         self.storage = storage
@@ -17,18 +21,24 @@ class ThrottlingMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
-        if event.from_user.id in self.admin_ids:
+        if not isinstance(event, Message):
             return await handler(event, data)
-        else:
-            user = f"trottling_user{event.from_user.id}"
-            check_user = await self.storage.redis.get(name=user)
 
-            if check_user:
-                if int(check_user.decode()) == 1:
-                    await self.storage.redis.set(name=user, value=0, ex=1)
-                    return await event.answer(
-                        text="Мы обнаружили подозрительную активность. Подождите 1 секунду"
-                    )
-                return
-            await self.storage.redis.set(name=user, value=1, ex=2)
+        user = event.from_user
+        if user is None or user.id in self.admin_ids:
             return await handler(event, data)
+
+        key = f"throttle:user:{user.id}"
+        # NX: только если ключа ещё нет — разрешаем запрос и ставим окно cooldown
+        was_set = await self.storage.redis.set(
+            name=key,
+            value="1",
+            ex=self.COOLDOWN_SEC,
+            nx=True,
+        )
+        if not was_set:
+            return await event.answer(
+                "Слишком много сообщений подряд. Подождите пару секунд."
+            )
+
+        return await handler(event, data)

@@ -7,6 +7,10 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from psycopg_pool import AsyncConnectionPool
 
+from app.infrastructure.database.db import (
+    record_delivery_metric_with_pool,
+    record_metric_event_with_pool,
+)
 from app.lexicon.lexicon_ru import LEXICON_PROMO_RU
 
 logger = logging.getLogger(__name__)
@@ -64,6 +68,10 @@ async def start_promo_listener(
 
     except Exception as e:
         logger.error(f"Error in Redis keyspace notifications listener: {e}")
+        await record_metric_event_with_pool(
+            db_pool,
+            event_name="redis_listener_restart",
+        )
         raise
 
 
@@ -97,6 +105,12 @@ async def send_promo_to_expired_user(
                     try:
                         await send_promo_to_user(bot, user)
                         logger.info(f"Promo message sent to user {user_id}")
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_48h",
+                            status="sent",
+                            user_id=user_id,
+                        )
                     except TelegramRetryAfter as e:
                         wait_time = e.retry_after
                         logger.warning(
@@ -104,6 +118,12 @@ async def send_promo_to_expired_user(
                         )
                         await asyncio.sleep(wait_time)
                         await send_promo_to_user(bot, user)
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_48h",
+                            status="sent",
+                            user_id=user_id,
+                        )
                     except TelegramBadRequest as e:
                         error_msg = str(e)
                         if (
@@ -111,17 +131,56 @@ async def send_promo_to_expired_user(
                             or "bot was blocked" in error_msg
                         ):
                             logger.warning(f"User {user_id} blocked bot")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_48h",
+                                status="blocked",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                         elif "user is deactivated" in error_msg:
                             logger.warning(f"User {user_id} deactivated")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_48h",
+                                status="deactivated",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                         else:
                             logger.error(f"Bad request for user {user_id}: {error_msg}")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_48h",
+                                status="failed",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                     except Exception as e:
                         logger.error(f"Error sending promo to user {user_id}: {e}")
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_48h",
+                            status="failed",
+                            user_id=user_id,
+                            error_text=str(e),
+                        )
                 else:
                     logger.info(f"User {user_id} is no longer active, skipping promo")
+                    await record_delivery_metric_with_pool(
+                        db_pool,
+                        category="promo_48h",
+                        status="skipped",
+                        user_id=user_id,
+                    )
 
     except Exception as e:
         logger.error(f"Error processing expired promo for user {user_id}: {e}")
+        await record_metric_event_with_pool(
+            db_pool,
+            event_name="db_error",
+            user_id=user_id,
+        )
 
 
 async def send_instagram_promo_to_expired_user(
@@ -165,6 +224,12 @@ async def send_instagram_promo_to_expired_user(
                         await mark_instagram_promo_sent(user_id, redis_client)
 
                         logger.info(f"Instagram promo message sent to user {user_id}")
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_instagram",
+                            status="sent",
+                            user_id=user_id,
+                        )
                     except TelegramRetryAfter as e:
                         wait_time = e.retry_after
                         logger.warning(
@@ -175,6 +240,12 @@ async def send_instagram_promo_to_expired_user(
 
                         # Отмечаем, что Instagram промо было отправлено
                         await mark_instagram_promo_sent(user_id, redis_client)
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_instagram",
+                            status="sent",
+                            user_id=user_id,
+                        )
 
                     except TelegramBadRequest as e:
                         error_msg = str(e)
@@ -183,22 +254,61 @@ async def send_instagram_promo_to_expired_user(
                             or "bot was blocked" in error_msg
                         ):
                             logger.warning(f"User {user_id} blocked bot")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_instagram",
+                                status="blocked",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                         elif "user is deactivated" in error_msg:
                             logger.warning(f"User {user_id} deactivated")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_instagram",
+                                status="deactivated",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                         else:
                             logger.error(f"Bad request for user {user_id}: {error_msg}")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_instagram",
+                                status="failed",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                     except Exception as e:
                         logger.error(
                             f"Error sending Instagram promo to user {user_id}: {e}"
+                        )
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_instagram",
+                            status="failed",
+                            user_id=user_id,
+                            error_text=str(e),
                         )
                 else:
                     logger.info(
                         f"User {user_id} is no longer active, skipping Instagram promo"
                     )
+                    await record_delivery_metric_with_pool(
+                        db_pool,
+                        category="promo_instagram",
+                        status="skipped",
+                        user_id=user_id,
+                    )
 
     except Exception as e:
         logger.error(
             f"Error processing expired Instagram promo for user {user_id}: {e}"
+        )
+        await record_metric_event_with_pool(
+            db_pool,
+            event_name="db_error",
+            user_id=user_id,
         )
 
 
@@ -294,6 +404,12 @@ async def send_consultation_promo_to_expired_user(
                         logger.info(
                             f"Consultation promo message sent to user {user_id}"
                         )
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_consultation",
+                            status="sent",
+                            user_id=user_id,
+                        )
                     except TelegramRetryAfter as e:
                         wait_time = e.retry_after
                         logger.warning(
@@ -301,6 +417,12 @@ async def send_consultation_promo_to_expired_user(
                         )
                         await asyncio.sleep(wait_time)
                         await send_consultation_promo_to_user(bot, user)
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_consultation",
+                            status="sent",
+                            user_id=user_id,
+                        )
                     except TelegramBadRequest as e:
                         error_msg = str(e)
                         if (
@@ -308,22 +430,61 @@ async def send_consultation_promo_to_expired_user(
                             or "bot was blocked" in error_msg
                         ):
                             logger.warning(f"User {user_id} blocked bot")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_consultation",
+                                status="blocked",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                         elif "user is deactivated" in error_msg:
                             logger.warning(f"User {user_id} deactivated")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_consultation",
+                                status="deactivated",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                         else:
                             logger.error(f"Bad request for user {user_id}: {error_msg}")
+                            await record_delivery_metric_with_pool(
+                                db_pool,
+                                category="promo_consultation",
+                                status="failed",
+                                user_id=user_id,
+                                error_text=error_msg,
+                            )
                     except Exception as e:
                         logger.error(
                             f"Error sending consultation promo to user {user_id}: {e}"
+                        )
+                        await record_delivery_metric_with_pool(
+                            db_pool,
+                            category="promo_consultation",
+                            status="failed",
+                            user_id=user_id,
+                            error_text=str(e),
                         )
                 else:
                     logger.info(
                         f"User {user_id} is no longer active, skipping consultation promo"
                     )
+                    await record_delivery_metric_with_pool(
+                        db_pool,
+                        category="promo_consultation",
+                        status="skipped",
+                        user_id=user_id,
+                    )
 
     except Exception as e:
         logger.error(
             f"Error processing expired consultation promo for user {user_id}: {e}"
+        )
+        await record_metric_event_with_pool(
+            db_pool,
+            event_name="db_error",
+            user_id=user_id,
         )
 
 

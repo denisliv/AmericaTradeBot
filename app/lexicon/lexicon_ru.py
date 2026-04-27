@@ -4,13 +4,29 @@ LEXICON_COMMANDS_RU: dict[str, str] = {
     "/start_description": "Запуск бота",
     "/help_description": "Справка по работе бота",
     "/subscription_description": "Проверить подписки",
-    "/chat_description": "Чат с AI-ассистентом",
+    "/chat_description": "Чат с AI-менеджером",
     "/statistics_description": "Статистика",
+    "/admin_description": "Панель администратора",
     "/ban_description": "Забанить пользователя (требует user_id или username)",
     "/unban_description": "Разбанить пользователя (требует user_id или username)",
 }
 
+LEXICON_ADMIN_BUTTONS_RU: dict[str, str] = {
+    "statistics_button": "Статистика",
+    "newsletter_button": "Создать рассылку",
+    "ban_user_button": "Забанить",
+    "unban_user_button": "Разбанить",
+    "exit_button": "Выйти",
+    "add_button": "Да",
+    "no_button": "Нет",
+    "confirm_sender": "Подтвердить",
+    "cancel_sender": "Отменить",
+}
+
 LEXICON_ADMIN_RU: dict[str, str] = {
+    "admin_panel_enter_ban": "Введите <b>user_id</b> (число) или <b>@username</b> пользователя, которого нужно забанить.",
+    "admin_panel_enter_unban": "Введите <b>user_id</b> (число) или <b>@username</b> пользователя, которого нужно разбанить.",
+    "admin_mailing_in_progress": "Сначала завершите или отмените создание рассылки: нажмите «Выйти» в панели и при необходимости начните снова.",
     "empty_ban_answer": "Вы не ввели аргумент для бана",
     "empty_unban_answer": "Вы не ввели аргумент для разбана",
     "incorrect_unban_arg": "Некорректный аргумент для разбана",
@@ -23,15 +39,17 @@ LEXICON_ADMIN_RU: dict[str, str] = {
 }
 
 LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
-    "/start_text": lambda x: f"Здравствуйте, <b>{x}</b>! Компания AmericaTrade рада приветствовать Вас!\r\n\n"
-    "Если Вы планируете приобрести автомобиль из США, Вы обратились по адресу!\r\n\n"
-    "Здесь Вы можете:\r\n\n"
-    "- Узнать все об американских автомобилях.\r\n"
-    "- Воспользоваться бесплатной консультацией от нашего эксперта.\r\n"
-    "- Получать реальные варианты с аукционов прямо здесь, в Telegram!\r\n"
-    "- Подписаться на обновления по интересующим Вас маркам и моделям авто.\r\n"
-    "- Первыми видеть самые 'ГОРЯЧИЕ' лоты на аукционах.\r\n\n"
-    "Пора воплотить мечту об американском авто в реальность! Готовы начать?",
+    "/start_text": lambda x: (
+        f"Здравствуйте, <b>{x}</b>! Компания AmericaTrade рада приветствовать Вас!\r\n\n"
+        "Если Вы планируете приобрести автомобиль из США, Вы обратились по адресу!\r\n\n"
+        "Здесь Вы можете:\r\n\n"
+        "- Узнать все об американских автомобилях.\r\n"
+        "- Воспользоваться бесплатной консультацией от нашего эксперта.\r\n"
+        "- Получать реальные варианты с аукционов прямо здесь, в Telegram!\r\n"
+        "- Подписаться на обновления по интересующим Вас маркам и моделям авто.\r\n"
+        "- Первыми видеть самые 'ГОРЯЧИЕ' лоты на аукционах.\r\n\n"
+        "Пора воплотить мечту об американском авто в реальность! Готовы начать?"
+    ),
     "/help_text": "Я ваш личный помощник по подбору авто из США.\r\n"
     "Хотите выгодно купить авто из США? Я помогу!\r\n"
     "Получите доступ к лучшим предложениям американских аукционов прямо здесь.\r\n"
@@ -39,7 +57,7 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "➡ Комманда /start - запуск бота.\r\n"
     "➡ Комманда /help - помощь по работе с ботом.\r\n"
     "➡ Комманда /subscription - редактирование ваших подписок.\r\n"
-    "➡ Комманда /chat - чат с AI-ассистентом.\r\n",
+    "➡ Комманда /chat - чат с AI-менеджером.\r\n",
     "contacts_text": "<b>Наши контакты:</b>\r\n\n"
     "📞 <b>+375 44 723-24-25</b>\r\n"
     "<a href='https://www.instagram.com/americatrade.by'>📱 Instagram</a>\r\n"
@@ -58,7 +76,7 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "advantages_text": "Почему нас выбирают?\r\n\n"
     "Главное преимущество — это экономия.\r\n"
     "Автомобили из США приезжают с выгодой до 40% от авторынка РБ.\r\n"
-    "- Опыт. Компания существует на рынке более 10 лет. Мы знаем все тонкости таможенного законодательства РБ и можем подобрать для вас оптимальный вариант авто.\r\n"
+    "- Опыт. Компания существует на рынке более 15 лет. Мы знаем все тонкости таможенного законодательства РБ и можем подобрать для вас оптимальный вариант авто.\r\n"
     "- Цены. Мы предлагаем доступные цены на наши услуги. Также всегда готовы обсудить условия сотрудничества и предложить вам наиболее выгодный вариант.\r\n"
     "- Репутация. За все время мы получили огромное количество положительных отзывов. Всегда оперативно и с максимальным профессионализмом находим подход к каждому клиенту.\r\n"
     "- Надёжность. Работаем только по договору. Все оплаты производятся исключительно через банк (без скрытых платежей и комиссий).\r\n"
@@ -95,18 +113,26 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "no_more_cars_text": "Больше вариантов не найдено.",
     "cars_describe_text": "Актуальные варианты на аукционе под Ваши критерии:",
     "top_cars_text": "ТОП 3 Авто по Вашим параметрам:",
+    "assisted_gallery_result_text": "Пример из подборки по вашим критериям — такой класс авто мы можем искать на аукционе:",
+    "assisted_gallery_empty_text": "Пока нет примеров для этой комбинации кузова и бюджета. Попробуйте другой бюджет или оставьте заявку — подберём вручную.",
     "popular_models_text": "Ниже представлены самые популярные модели по Вашим критериям:",
     "application_for_selection_text": "Укажите Ваше имя",
     "choose_phone_request_text": "Нажмите кнопку <b>Отправить номер телефона</b>, ",
     "phone_request_answer_text": "Отлично. Наш менеджер свяжется с Вами в ближайшее время.",
     "phone_request_answer_text_v2": "Ваша заявка принята. Наш менеджер свяжется с Вами в ближайшее время.",
-    "yes_subscription_text": lambda count: f"Вы успешно подписались на обновления по выбранному авто.\r\n\nОсталось подписок: {count}",
-    "no_subscription_text": lambda count: f"Ваш лимит достигнут.\r\n\nОсталось подписок: {count}",
+    "yes_subscription_text": lambda count: (
+        f"Вы успешно подписались на обновления по выбранному авто.\r\n\nОсталось подписок: {count}"
+    ),
+    "no_subscription_text": lambda count: (
+        f"Ваш лимит достигнут.\r\n\nОсталось подписок: {count}"
+    ),
     "subscriptions_text": "Ваши подписки:",
     "no_subscriptions_text": "У Вас нет актуальных подписок",
     "subscriptions_list_text": "Вы подписаны на следующие автомобили👇:",
     "subscription_deleted_text": "Подписка успешно удалена",
     "subscription_not_found_text": "Подписка не найдена",
+    "call_request_answer_text": "Спасибо! Ниже ссылки на сайт и отзывы — также можете написать нам в мессенджерах.",
+    "unknown_message_hint_text": "Используйте меню или Чат с AI-менеджером.",
 }
 
 LEXICON_BUTTONS_RU: dict[str, str] = {
@@ -131,8 +157,6 @@ LEXICON_BUTTONS_RU: dict[str, str] = {
     "application_for_selection_button": "Оставить заявку на бесплатный подбор",
     "delete_subscription_button": "❌ Удалить",
     "phone_number_button": "Отправить номер телефона",
-    "self_selection_subscription_button": "📋 Марка/Модель/Год",
-    "assisted_selection_subscription_button": "📋 Кузов/Бюджет",
 }
 
 
@@ -172,9 +196,10 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
         "VOLVO",
     ],
     "model_buttons": {
-        "ACURA": ["ILX", "MDX", "RDX", "TL", "TLX", "TSX"],
+        "ACURA": ["ALL MODELS", "ILX", "MDX", "RDX", "TL", "TLX", "TSX"],
         "ALFA ROMEO": ["GIULIA", "STELVIO"],
         "AUDI": [
+            "ALL MODELS",
             "A3",
             "A4",
             "A5",
@@ -194,6 +219,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "TT",
         ],
         "BMW": [
+            "ALL MODELS",
             "1 SERIES",
             "2 SERIES",
             "3 SERIES",
@@ -214,8 +240,9 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "X7",
             "Z4",
         ],
-        "BUICK": ["ENCLAVE", "ENCORE", "ENVISION", "LACROSSE", "REGAL"],
+        "BUICK": ["ALL MODELS", "ENCLAVE", "ENCORE", "ENVISION", "LACROSSE", "REGAL"],
         "CADILLAC": [
+            "ALL MODELS",
             "ATS",
             "CT4",
             "CT5",
@@ -228,6 +255,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "XTS",
         ],
         "CHEVROLET": [
+            "ALL MODELS",
             "BLAZER",
             "CAMARO",
             "COBALT",
@@ -244,8 +272,9 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "TRAVERSE",
             "TRAX",
         ],
-        "CHRYSLER": ["MINIVAN", "PACIFICA"],
+        "CHRYSLER": ["ALL MODELS", "MINIVAN", "PACIFICA"],
         "DODGE": [
+            "ALL MODELS",
             "CARAVAN",
             "CHALLENGER",
             "CHARGER",
@@ -255,8 +284,9 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "RAM 2500",
             "RAM 3500",
         ],
-        "FIAT": ["500"],
+        "FIAT": ["ALL MODELS", "500"],
         "FORD": [
+            "ALL MODELS",
             "BRONCO",
             "CMAX",
             "ECONOLINE",
@@ -276,8 +306,9 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "RANGER",
             "TAURUS",
         ],
-        "GMC": ["ACADIA", "SIERRA", "TERRAIN", "YUKON"],
+        "GMC": ["ALL MODELS", "ACADIA", "SIERRA", "TERRAIN", "YUKON"],
         "HONDA": [
+            "ALL MODELS",
             "ACCORD",
             "CIVIC",
             "CLARITY",
@@ -290,6 +321,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "RIDGELINE",
         ],
         "HYUNDAI": [
+            "ALL MODELS",
             "ELANTRA",
             "GENESIS",
             "IONIQ",
@@ -301,9 +333,19 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "VELOSTER",
             "VENUE",
         ],
-        "INFINITI": ["Q50", "Q60", "QX30", "QX50", "QX56", "QX60", "QX80"],
-        "JAGUAR": ["F-PACE", "F-TYPE", "I-PACE", "XE", "XF", "XJ"],
+        "INFINITI": [
+            "ALL MODELS",
+            "Q50",
+            "Q60",
+            "QX30",
+            "QX50",
+            "QX56",
+            "QX60",
+            "QX80",
+        ],
+        "JAGUAR": ["ALL MODELS", "F-PACE", "F-TYPE", "I-PACE", "XE", "XF", "XJ"],
         "JEEP": [
+            "ALL MODELS",
             "CHEROKEE",
             "COMPASS",
             "GRAND CHER",
@@ -312,6 +354,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "WRANGLER",
         ],
         "KIA": [
+            "ALL MODELS",
             "FORTE",
             "K5",
             "NIRO",
@@ -321,9 +364,10 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "SPORTAGE",
             "STINGER",
         ],
-        "LAND ROVER": ["DEFENDER", "DISCOVERY", "RANGEROVER"],
-        "LEXUS": ["ES350", "GX", "IS", "LX470", "NX", "RX350"],
+        "LAND ROVER": ["ALL MODELS", "DEFENDER", "DISCOVERY", "RANGEROVER"],
+        "LEXUS": ["ALL MODELS", "ES350", "GX", "IS", "LX470", "NX", "RX350"],
         "LINCOLN": [
+            "ALL MODELS",
             "AVIATOR",
             "CONTINENTL",
             "CORSAIR",
@@ -333,8 +377,19 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "NAUTILUS",
             "NAVIGATOR",
         ],
-        "MAZDA": ["3", "6", "CX-3", "CX-5", "CX-7", "CX-9", "CX30", "MX5"],
+        "MAZDA": [
+            "ALL MODELS",
+            "3",
+            "6",
+            "CX-3",
+            "CX-5",
+            "CX-7",
+            "CX-9",
+            "CX30",
+            "MX5",
+        ],
         "MERCEDES-BENZ": [
+            "ALL MODELS",
             "A-CLASS",
             "C-CLASS",
             "CLA-CLASS",
@@ -348,9 +403,10 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "GLS-CLASS",
             "S-CLASS",
         ],
-        "MINI": ["COOPER"],
-        "MITSUBISHI": ["ECLIPSE", "MIRAGE", "OUTLANDER"],
+        "MINI": ["ALL MODELS", "COOPER"],
+        "MITSUBISHI": ["ALL MODELS", "ECLIPSE", "MIRAGE", "OUTLANDER"],
         "NISSAN": [
+            "ALL MODELS",
             "ALTIMA",
             "KICKS",
             "LEAF",
@@ -362,6 +418,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "VERSA",
         ],
         "PORSCHE": [
+            "ALL MODELS",
             "911",
             "BOXSTER",
             "CAYENNE",
@@ -371,6 +428,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "TAYCAN",
         ],
         "SUBARU": [
+            "ALL MODELS",
             "ASCENT",
             "BRZ",
             "CROSSTREK",
@@ -379,8 +437,9 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "LEGACY",
             "OUTBACK",
         ],
-        "TESLA": ["MODEL 3", "MODEL S", "MODEL X", "MODEL Y"],
+        "TESLA": ["ALL MODELS", "MODEL 3", "MODEL S", "MODEL X", "MODEL Y"],
         "TOYOTA": [
+            "ALL MODELS",
             "4RUNNER",
             "CAMRY",
             "COROLLA",
@@ -395,6 +454,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "YARIS",
         ],
         "VOLKSWAGEN": [
+            "ALL MODELS",
             "ATLAS",
             "BEETLE",
             "GOLF",
@@ -403,7 +463,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "TAOS SE",
             "TIGUAN",
         ],
-        "VOLVO": ["S60", "S90", "XC40", "XC60", "XC90"],
+        "VOLVO": ["ALL MODELS", "S60", "S90", "XC40", "XC60", "XC90"],
     },
     "year_buttons": ["2016 - 2020", "2021 - 2023", "2024 - 2025"],
     "odometer_buttons": [
@@ -423,9 +483,10 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
     ],
     "budget_buttons": [
         "до 12.000$",
-        "12.000$ - 25.000$",
-        "25.000$ - 35.000$",
-        "35.000$ - 50.000$",
+        "12.000$ - 15.000$",
+        "15.000$ - 20.000$",
+        "20.000$ - 30.000$",
+        "30.000$ - 50.000$",
         "50.000$+",
     ],
 }
@@ -445,9 +506,10 @@ LEXICON_RU_CSV: dict[str, Callable[[Any], str]] = {
     "Кроссовер": "SUV",
     "Электромобиль": "Electric",
     "до 12.000$": [0, 12000],
-    "12.000$ - 25.000$": [12000, 25000],
-    "25.000$ - 35.000$": [25000, 35000],
-    "35.000$ - 50.000$": [35000, 50000],
+    "12.000$ - 15.000$": [12000, 15000],
+    "15.000$ - 20.000$": [15000, 20000],
+    "20.000$ - 30.000$": [20000, 30000],
+    "30.000$ - 50.000$": [30000, 50000],
     "50.000$+": [50000, 999999],
 }
 
@@ -491,28 +553,29 @@ LEXICON_EN_RU: dict[str, dict[str, str]] = {
 }
 
 
+LEXICON_ASSISTED_GALLERY_RU: dict[str, Callable[..., str]] = {
+    "caption": lambda name, car_title, body_label, budget_label: (
+        f"{name}, вот пример из категории «{body_label}» в бюджете «{budget_label}».\n\n"
+        f"<b>{car_title}</b> — ориентир по типу и классу автомобиля. Реальные лоты на аукционе "
+        f"мы подбираем индивидуально под ваш запрос и рассчитываем итоговую стоимость «под ключ»."
+    ),
+}
+
+
 LEXICON_CAPTION_RU: dict[str, Callable[[Any], str] | str] = {
-    "caption_text": lambda name,
-    number,
-    year,
-    brand,
-    model,
-    color,
-    odometer,
-    engine,
-    drive,
-    transmission,
-    sale_date: f"{name}, на данный момент доступны следующие варианты:\r\n"
-    f"<b>Автомобиль № {number}</b>\r\n"
-    f"<b>{brand} {model}</b> 🔥\r\n\n"
-    f"✅ Модельный год: {year}\r\n"
-    f"✅ Цвет: {color}\r\n"
-    f"✅ Объем двигателя: {engine[:4]}\r\n"
-    f"✅ Трансмиссия: {transmission}\r\n"
-    f"✅ Привод: {drive}\r\n"
-    f"✅ Пробег: {int(float(odometer) * 1.60934)} км.\r\n"
-    f"⌛ Дата аукциона: "
-    f"{'Не назначена' if sale_date == '0' else sale_date[0:4] + '-' + sale_date[4:6] + '-' + sale_date[6:]}"
+    "caption_text": lambda name, number, year, brand, model, color, odometer, engine, drive, transmission, sale_date: (
+        f"{name}, на данный момент доступны следующие варианты:\r\n"
+        f"<b>Автомобиль № {number}</b>\r\n"
+        f"<b>{brand} {model}</b> 🔥\r\n\n"
+        f"✅ Модельный год: {year}\r\n"
+        f"✅ Цвет: {color}\r\n"
+        f"✅ Объем двигателя: {engine[:4]}\r\n"
+        f"✅ Трансмиссия: {transmission}\r\n"
+        f"✅ Привод: {drive}\r\n"
+        f"✅ Пробег: {int(float(odometer) * 1.60934)} км.\r\n"
+        f"⌛ Дата аукциона: "
+        f"{'Не назначена' if sale_date == '0' else sale_date[0:4] + '-' + sale_date[4:6] + '-' + sale_date[6:]}"
+    )
 }
 
 LEXICON_NEWSLETTER_RU: dict[str, str] = {

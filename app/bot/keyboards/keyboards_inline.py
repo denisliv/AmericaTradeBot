@@ -1,11 +1,11 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.infrastructure.database.orm_models import (
-    AssistedSelectionRow,
-    SelfSelectionRow,
+from app.infrastructure.database.orm_models import SelfSelectionRow
+from app.lexicon.lexicon_ru import (
+    LEXICON_ADMIN_BUTTONS_RU,
+    LEXICON_BUTTONS_RU,
 )
-from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU
 
 
 # Функция, генерирующая клавиатуру для выбора пользователем дальнейшего шага
@@ -101,17 +101,22 @@ def create_auto_keyboard(
                 text=LEXICON_BUTTONS_RU["application_for_selection_button"],
                 callback_data="application_for_selection_button",
             ),
+        ]
+    )
+
+    if search_type != "assisted":
+        action_buttons.append(
             InlineKeyboardButton(
                 text=LEXICON_BUTTONS_RU["subscription_button"],
-                callback_data="assisted_subscription_button"
-                if search_type == "assisted"
-                else "self_subscription_button",
-            ),
-            InlineKeyboardButton(
-                text=LEXICON_BUTTONS_RU["back_to:main_menu"],
-                callback_data="back_to:main_menu",
-            ),
-        ]
+                callback_data="self_subscription_button",
+            )
+        )
+
+    action_buttons.append(
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["back_to:main_menu"],
+            callback_data="back_to:main_menu",
+        )
     )
 
     kb_builder.row(*action_buttons, width=width)
@@ -138,7 +143,6 @@ def format_date(created_at) -> str:
 
 def create_subscriptions_keyboard(
     self_selection_subs: list[SelfSelectionRow] = None,
-    assisted_selection_subs: list[AssistedSelectionRow] = None,
     show_back_button: bool = True,
 ) -> InlineKeyboardMarkup:
     """
@@ -146,7 +150,6 @@ def create_subscriptions_keyboard(
 
     Args:
         self_selection_subs: Список self selection подписок
-        assisted_selection_subs: Список assisted selection подписок
         show_back_button: Показывать ли кнопку "Назад"
 
     Returns:
@@ -164,26 +167,33 @@ def create_subscriptions_keyboard(
                 InlineKeyboardButton(text=button_text, callback_data=callback_data)
             )
 
-    # Добавляем кнопки для assisted selection подписок
-    if assisted_selection_subs:
-        for sub in assisted_selection_subs:
-            date_str = format_date(sub.created_at)
-            button_text = f"{date_str} ▪ {sub.body_style} ▪ {sub.budget}"
-            callback_data = f"view_subscription_assisted_{sub.id}"
-            kb_builder.add(
-                InlineKeyboardButton(text=button_text, callback_data=callback_data)
-            )
-
     # Добавляем кнопку "Назад" если нужно
     if show_back_button:
         kb_builder.add(
             InlineKeyboardButton(
                 text=LEXICON_BUTTONS_RU["back_to:more_info"],
-                callback_data="back_to_subscriptions",
+                callback_data="back_to:main_menu",
             )
         )
 
     # Настраиваем расположение кнопок (по одной в строке)
     kb_builder.adjust(1)
 
+    return kb_builder.as_markup()
+
+
+def create_admin_keyboard(*buttons: str, width: int = 2) -> InlineKeyboardMarkup:
+    kb_builder: InlineKeyboardBuilder = InlineKeyboardBuilder()
+    kb_builder.row(
+        *[
+            InlineKeyboardButton(
+                text=LEXICON_ADMIN_BUTTONS_RU[button]
+                if button in LEXICON_ADMIN_BUTTONS_RU
+                else button,
+                callback_data=button,
+            )
+            for button in buttons
+        ],
+        width=width,
+    )
     return kb_builder.as_markup()

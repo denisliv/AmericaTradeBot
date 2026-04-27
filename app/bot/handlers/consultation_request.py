@@ -23,6 +23,7 @@ async def process_application_for_selection_button_press(
     msg = await callback.message.edit_text(
         text=LEXICON_RU["application_for_selection_text"]
     )
+    await callback.answer()
     await state.update_data(old_message_id=msg.message_id)
     await state.set_state(FSMFillConsultationRequestForm.get_name)
 
