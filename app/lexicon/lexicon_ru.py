@@ -111,7 +111,7 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "nothing_found_text": "УПС...\r\n"
     "К сожалению на данный момент на аукционе нет вариантов под Ваши критерии.",
     "no_more_cars_text": "Больше вариантов не найдено.",
-    "cars_describe_text": "Актуальные варианты на аукционе под Ваши критерии:",
+    "cars_describe_text": "Вы можете выбрать понравившийся автомобиль или продолжить поиск:",
     "top_cars_text": "ТОП 3 Авто по Вашим параметрам:",
     "assisted_gallery_result_text": "Пример из подборки по вашим критериям — такой класс авто мы можем искать на аукционе:",
     "assisted_gallery_empty_text": "Пока нет примеров для этой комбинации кузова и бюджета. Попробуйте другой бюджет или оставьте заявку — подберём вручную.",
@@ -157,6 +157,8 @@ LEXICON_BUTTONS_RU: dict[str, str] = {
     "application_for_selection_button": "Оставить заявку на бесплатный подбор",
     "delete_subscription_button": "❌ Удалить",
     "phone_number_button": "Отправить номер телефона",
+    "auction_status:buy_now": "Фиксированная цена КУПИТЬ СЕЙЧАС 🔥",
+    "auction_status:all_variants": "Все варианты",
 }
 
 
@@ -473,8 +475,8 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
         "Не имеет значения",
     ],
     "auction_status_buttons": [
-        "Только BUY NOW",
-        "Все варианты",
+        ("Только BUY NOW", "auction_status:buy_now"),
+        ("Все варианты", "auction_status:all_variants"),
     ],
     "body_style_buttons": [
         "Седан",
@@ -563,11 +565,12 @@ LEXICON_ASSISTED_GALLERY_RU: dict[str, Callable[..., str]] = {
 
 
 LEXICON_CAPTION_RU: dict[str, Callable[[Any], str] | str] = {
-    "caption_text": lambda name, number, year, brand, model, color, odometer, engine, drive, transmission, sale_date: (
+    "caption_text": lambda name, number, year, brand, model, color, odometer, engine, drive, transmission, sale_date, buy_now_price=None: (
         f"{name}, на данный момент доступны следующие варианты:\r\n"
         f"<b>Автомобиль № {number}</b>\r\n"
         f"<b>{brand} {model}</b> 🔥\r\n\n"
-        f"✅ Модельный год: {year}\r\n"
+        + (f"💰 Фиксированная цена на аукционе: {buy_now_price} $\r\n\n" if buy_now_price else "")
+        + f"✅ Модельный год: {year}\r\n"
         f"✅ Цвет: {color}\r\n"
         f"✅ Объем двигателя: {engine[:4]}\r\n"
         f"✅ Трансмиссия: {transmission}\r\n"

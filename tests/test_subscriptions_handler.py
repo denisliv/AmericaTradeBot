@@ -1,39 +1,45 @@
 import inspect
 
-from app.bot.handlers.subscriptions import _parse_subscription_callback_data
+import pytest
+
+from app.bot.callback_data import (
+    DeleteSubscriptionCB,
+    SubscribeCB,
+    ViewSubscriptionCB,
+)
 from app.bot.keyboards.keyboards_inline import create_subscriptions_keyboard
 
 
-def test_parse_subscription_callback_data_valid_view():
-    parsed = _parse_subscription_callback_data(
-        "view_subscription_self_42",
-        expected_prefix="view_subscription",
-    )
-    assert parsed == ("self", 42)
+def test_view_callback_roundtrip():
+    packed = ViewSubscriptionCB(source="self", subscription_id=42).pack()
+    unpacked = ViewSubscriptionCB.unpack(packed)
+    assert unpacked.source == "self"
+    assert unpacked.subscription_id == 42
 
 
-def test_parse_subscription_callback_data_invalid_prefix():
-    parsed = _parse_subscription_callback_data(
-        "delete_subscription_self_42",
-        expected_prefix="view_subscription",
-    )
-    assert parsed is None
+def test_delete_callback_roundtrip():
+    packed = DeleteSubscriptionCB(source="self", subscription_id=42).pack()
+    unpacked = DeleteSubscriptionCB.unpack(packed)
+    assert unpacked.source == "self"
+    assert unpacked.subscription_id == 42
 
 
-def test_parse_subscription_callback_data_invalid_type():
-    parsed = _parse_subscription_callback_data(
-        "view_subscription_other_42",
-        expected_prefix="view_subscription",
-    )
-    assert parsed is None
+def test_view_callback_distinct_prefix_from_delete():
+    view = ViewSubscriptionCB(source="self", subscription_id=42).pack()
+    delete = DeleteSubscriptionCB(source="self", subscription_id=42).pack()
+    assert view != delete
+    with pytest.raises(ValueError):
+        ViewSubscriptionCB.unpack(delete)
 
 
-def test_parse_subscription_callback_data_invalid_id():
-    parsed = _parse_subscription_callback_data(
-        "view_subscription_self_abc",
-        expected_prefix="view_subscription",
-    )
-    assert parsed is None
+def test_view_callback_rejects_non_integer_id():
+    with pytest.raises(ValueError):
+        ViewSubscriptionCB.unpack("sub_view:self:abc")
+
+
+def test_subscribe_callback_roundtrip():
+    packed = SubscribeCB(source="self").pack()
+    assert SubscribeCB.unpack(packed).source == "self"
 
 
 def test_subscriptions_keyboard_ignores_assisted_subscriptions():

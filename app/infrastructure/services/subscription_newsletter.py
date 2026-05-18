@@ -3,6 +3,7 @@ import logging
 from typing import List, Tuple
 
 from aiogram import Bot
+from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from psycopg_pool import AsyncConnectionPool
@@ -13,7 +14,7 @@ from app.infrastructure.database.db import (
     record_delivery_metric,
 )
 from app.infrastructure.services.utils import get_data, make_media_group
-from app.lexicon.lexicon_ru import LEXICON_NEWSLETTER_RU, LEXICON_RU
+from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU, LEXICON_NEWSLETTER_RU, LEXICON_RU
 
 logger = logging.getLogger(__name__)
 
@@ -32,25 +33,45 @@ async def send_self_selection_cars(
         return 0
 
     messages_sent = 0
-    successful_cars = []
+    any_sent = False
 
-    # Отправляем все media_group для автомобилей
+    # Под каждую медиагруппу — сообщение "👇 Актуальные варианты:" с одной
+    # кнопкой выбора авто. Media group не поддерживает reply_markup,
+    # поэтому кнопка идёт отдельным сообщением сразу под альбомом.
     for i, (car, images) in enumerate(cars_data, 1):
         try:
-            # Проверяем, что у автомобиля есть изображения
             if not images:
                 logger.warning(f"No images for car {i}, skipping")
                 continue
 
-            # Создаем media group с фото
             media_group = await make_media_group(
                 (car, images), subscriber.name or "Пользователь", i
             )
 
-            # Отправляем фото
             await bot.send_media_group(chat_id=subscriber.user_id, media=media_group)
-            successful_cars.append((i, car))
             messages_sent += 1
+
+            await bot.send_message(
+                chat_id=subscriber.user_id,
+                text="👇 Нажмите кнопку, чтобы получить расчёт цены под ключ в РБ:",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text=f"Авто № {i}",
+                                callback_data=(
+                                    f"Лот №: {car.get('Lot number', 'N/A')}"
+                                    f"-{car.get('Make', 'N/A')}"
+                                    f"-{car.get('Model Detail', 'N/A')}"
+                                ),
+                                style=ButtonStyle.PRIMARY,
+                            )
+                        ]
+                    ]
+                ),
+            )
+            messages_sent += 1
+            any_sent = True
             await asyncio.sleep(0.5)  # пауза между автомобилями
 
         except Exception as e:
@@ -59,27 +80,22 @@ async def send_self_selection_cars(
             logger.error(f"Images: {images}")
             continue
 
-    # Отправляем одно сообщение с кнопками для всех успешно отправленных автомобилей
-    if successful_cars:
-        # Создаем кнопки для всех автомобилей
-        keyboard_buttons = []
-        for i, car in successful_cars:
-            keyboard_buttons.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"Авто № {i}",
-                        callback_data=f"Лот №: {car.get('Lot number', 'N/A')}-{car.get('Make', 'N/A')}-{car.get('Model Detail', 'N/A')}",
-                    )
-                ]
-            )
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-
-        # Отправляем сообщение с кнопками
+    # Финальное CTA-сообщение с зелёной кнопкой заявки на подбор
+    if any_sent:
         await bot.send_message(
             chat_id=subscriber.user_id,
             text=LEXICON_NEWSLETTER_RU["car_selection_text"],
-            reply_markup=keyboard,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=LEXICON_BUTTONS_RU["application_for_selection_button"],
+                            callback_data="application_for_selection_button",
+                            style=ButtonStyle.SUCCESS,
+                        )
+                    ]
+                ]
+            ),
         )
         messages_sent += 1
 

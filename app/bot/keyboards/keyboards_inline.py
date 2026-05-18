@@ -1,28 +1,46 @@
+from aiogram.enums import ButtonStyle
+from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from app.bot.callback_data import SubscribeCB, ViewSubscriptionCB
 from app.infrastructure.database.orm_models import SelfSelectionRow
 from app.lexicon.lexicon_ru import (
     LEXICON_ADMIN_BUTTONS_RU,
     LEXICON_BUTTONS_RU,
 )
 
+ChoiceButton = (
+    str
+    | tuple[str | CallbackData, str]
+    | tuple[str | CallbackData, ButtonStyle]
+    | tuple[str | CallbackData, str, ButtonStyle]
+)
+
 
 # Функция, генерирующая клавиатуру для выбора пользователем дальнейшего шага
-def create_choice_keyboard(*buttons: str, width: int = 2) -> InlineKeyboardMarkup:
+def create_choice_keyboard(*buttons: ChoiceButton, width: int = 2) -> InlineKeyboardMarkup:
     kb_builder: InlineKeyboardBuilder = InlineKeyboardBuilder()
-    kb_builder.row(
-        *[
-            InlineKeyboardButton(
-                text=LEXICON_BUTTONS_RU[button]
-                if button in LEXICON_BUTTONS_RU
-                else button,
-                callback_data=button,
-            )
-            for button in buttons
-        ],
-        width=width,
-    )
+    items = []
+    for button in buttons:
+        style: ButtonStyle | None = None
+        if isinstance(button, tuple):
+            if len(button) == 3:
+                callback, text_key, style = button
+            else:
+                first, second = button
+                if isinstance(second, ButtonStyle):
+                    callback, text_key, style = first, first, second
+                else:
+                    callback, text_key = first, second
+        else:
+            callback, text_key = button, button
+        text = LEXICON_BUTTONS_RU.get(text_key, text_key)
+        callback_data = callback.pack() if isinstance(callback, CallbackData) else callback
+        items.append(InlineKeyboardButton(
+            text=text, callback_data=callback_data, style=style
+        ))
+    kb_builder.row(*items, width=width)
     return kb_builder.as_markup()
 
 
@@ -56,20 +74,16 @@ def create_url_keyboard(back: bool = False, width: int = 2) -> InlineKeyboardMar
     return kb.as_markup()
 
 
-# Функция, генерирующая клавиатуру для выбора понравившегося автомобиля
+# Функция, генерирующая клавиатуру действий после выдачи авто/примеров.
+# Сами кнопки выбора авто/примера теперь идут отдельными сообщениями под
+# каждой медиагруппой (см. safe_send_media_group / _send_one_assisted_gallery_pick).
 def create_auto_keyboard(
-    buttons: list[tuple[str, str]],
+    *,
     width: int = 1,
     else_car: bool = True,
     search_type: str = "self",
 ) -> InlineKeyboardMarkup:
     kb_builder = InlineKeyboardBuilder()
-
-    # Основные кнопки (список автомобилей)
-    kb_builder.row(
-        *[InlineKeyboardButton(text=text, callback_data=cb) for text, cb in buttons],
-        width=width,
-    )
 
     # Кнопки действий
     action_buttons = []
@@ -100,6 +114,7 @@ def create_auto_keyboard(
             InlineKeyboardButton(
                 text=LEXICON_BUTTONS_RU["application_for_selection_button"],
                 callback_data="application_for_selection_button",
+                style=ButtonStyle.SUCCESS,
             ),
         ]
     )
@@ -108,7 +123,7 @@ def create_auto_keyboard(
         action_buttons.append(
             InlineKeyboardButton(
                 text=LEXICON_BUTTONS_RU["subscription_button"],
-                callback_data="self_subscription_button",
+                callback_data=SubscribeCB(source="self").pack(),
             )
         )
 
@@ -162,9 +177,13 @@ def create_subscriptions_keyboard(
         for sub in self_selection_subs:
             date_str = format_date(sub.created_at)
             button_text = f"{date_str} ▪ {sub.brand} {sub.model} ▪ {sub.year}"
-            callback_data = f"view_subscription_self_{sub.id}"
             kb_builder.add(
-                InlineKeyboardButton(text=button_text, callback_data=callback_data)
+                InlineKeyboardButton(
+                    text=button_text,
+                    callback_data=ViewSubscriptionCB(
+                        source="self", subscription_id=sub.id
+                    ).pack(),
+                )
             )
 
     # Добавляем кнопку "Назад" если нужно

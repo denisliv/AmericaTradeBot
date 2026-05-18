@@ -3,6 +3,7 @@ import logging
 
 import redis.asyncio as redis
 from aiogram import Bot
+from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from psycopg_pool import AsyncConnectionPool
@@ -526,6 +527,7 @@ async def send_consultation_promo_to_user(bot: Bot, user) -> None:
                 InlineKeyboardButton(
                     text=LEXICON_PROMO_RU["consultation_button_text"],
                     callback_data="application_for_selection_button",
+                    style=ButtonStyle.SUCCESS,
                 )
             ]
         ]
@@ -548,6 +550,7 @@ async def send_promo_to_user(bot: Bot, user) -> None:
                 InlineKeyboardButton(
                     text=LEXICON_PROMO_RU["telegram_button_text"],
                     url="https://t.me/americatradeby",
+                    style=ButtonStyle.SUCCESS,
                 )
             ]
         ]
@@ -572,6 +575,7 @@ async def send_instagram_promo_to_user(bot: Bot, user) -> None:
                 InlineKeyboardButton(
                     text=LEXICON_PROMO_RU["instagram_button_text"],
                     url="https://www.instagram.com/americatrade.by",
+                    style=ButtonStyle.SUCCESS,
                 )
             ]
         ]

@@ -10,6 +10,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from app.bot.callback_data import DeleteSubscriptionCB, ViewSubscriptionCB
 from app.bot.keyboards.keyboards_inline import (
     create_choice_keyboard,
     create_subscriptions_keyboard,
@@ -26,22 +27,6 @@ from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU, LEXICON_RU
 logger = logging.getLogger(__name__)
 
 subscriptions_router = Router()
-
-
-def _parse_subscription_callback_data(data: str, expected_prefix: str) -> tuple[str, int] | None:
-    parts = data.split("_")
-    if len(parts) != 4:
-        return None
-    if f"{parts[0]}_{parts[1]}" != expected_prefix:
-        return None
-    subscription_type = parts[2]
-    if subscription_type != "self":
-        return None
-    try:
-        subscription_id = int(parts[3])
-    except (TypeError, ValueError):
-        return None
-    return subscription_type, subscription_id
 
 
 # Этот хэндлер срабатывает на команду /subscription и callback back_to_subscriptions
@@ -113,28 +98,18 @@ async def process_view_self_selection_subscriptions(
 
 
 # Этот хэндлер будет срабатывать на просмотр подписки
-@subscriptions_router.callback_query(F.data.startswith("view_subscription_"))
+@subscriptions_router.callback_query(ViewSubscriptionCB.filter())
 async def process_view_subscription(
     callback: CallbackQuery,
+    callback_data: ViewSubscriptionCB,
     conn,
 ):
-    parsed = _parse_subscription_callback_data(
-        callback.data, expected_prefix="view_subscription"
-    )
-    if parsed is None:
-        await record_metric_event(
-            conn,
-            event_name="invalid_callback",
-            user_id=callback.from_user.id,
-        )
-        await callback.answer("Некорректная подписка", show_alert=True)
-        return
-    subscription_type, subscription_id = parsed
-
-    if subscription_type == "self":
+    if callback_data.source == "self":
         # Получаем данные self selection подписки
         row = await get_self_selection_subscription_by_id(
-            conn, user_id=callback.from_user.id, subscription_id=subscription_id
+            conn,
+            user_id=callback.from_user.id,
+            subscription_id=callback_data.subscription_id,
         )
         if row is None:
             await process_view_self_selection_subscriptions(callback, conn)
@@ -154,19 +129,22 @@ async def process_view_subscription(
     buttons = [
         (
             LEXICON_BUTTONS_RU["delete_subscription_button"],
-            f"delete_subscription_{subscription_type}_{subscription_id}",
+            DeleteSubscriptionCB(
+                source=callback_data.source,
+                subscription_id=callback_data.subscription_id,
+            ).pack(),
         ),
         (
             LEXICON_BUTTONS_RU["back_to:more_info"],
-            f"view_{subscription_type}_selection_subscriptions",
+            f"view_{callback_data.source}_selection_subscriptions",
         ),
         (LEXICON_BUTTONS_RU["back_to:main_menu"], "back_to:main_menu"),
     ]
 
     kb_builder = InlineKeyboardBuilder()
-    for button_text, callback_data in buttons:
+    for button_text, raw_callback_data in buttons:
         kb_builder.add(
-            InlineKeyboardButton(text=button_text, callback_data=callback_data)
+            InlineKeyboardButton(text=button_text, callback_data=raw_callback_data)
         )
     kb_builder.adjust(1)
 
@@ -178,31 +156,19 @@ async def process_view_subscription(
 
 
 # Этот хэндлер будет срабатывать на удаление подписки
-@subscriptions_router.callback_query(F.data.startswith("delete_subscription_"))
+@subscriptions_router.callback_query(DeleteSubscriptionCB.filter())
 async def process_delete_subscription(
     callback: CallbackQuery,
+    callback_data: DeleteSubscriptionCB,
     conn,
 ):
-    parsed = _parse_subscription_callback_data(
-        callback.data, expected_prefix="delete_subscription"
-    )
-    if parsed is None:
-        await record_metric_event(
-            conn,
-            event_name="invalid_callback",
-            user_id=callback.from_user.id,
-        )
-        await callback.answer("Некорректная подписка", show_alert=True)
-        return
-    subscription_type, subscription_id = parsed
-
-    table = f"{subscription_type}_selection_requests"
+    table = f"{callback_data.source}_selection_requests"
 
     # Удаляем подписку
     success = await delete_subscription(
         conn,
         user_id=callback.from_user.id,
-        subscription_id=subscription_id,
+        subscription_id=callback_data.subscription_id,
         table=table,
     )
 

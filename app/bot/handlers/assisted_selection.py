@@ -1,9 +1,10 @@
 import asyncio
 
 from aiogram import F, Router
+from aiogram.enums import ButtonStyle
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from psycopg.connection_async import AsyncConnection
 
 from app.bot.keyboards.keyboards_inline import (
@@ -64,27 +65,38 @@ async def _send_one_assisted_gallery_pick(
     body_style: str,
     budget: str,
     number: int,
-) -> tuple[list[tuple[str, str]], int]:
-    """Возвращает (кнопки для клавиатуры, следующий номер)."""
+) -> tuple[bool, int]:
+    """Возвращает (успешно_ли_отправлено, следующий_номер).
+
+    После альбома сразу шлёт сообщение "👇Выбрать:" с одной кнопкой —
+    media group не поддерживает reply_markup.
+    """
     pick = pick_random_assisted_gallery(body_style, budget)
-    data_buttons: list[tuple[str, str]] = []
     if not pick:
-        return data_buttons, number
+        return False, number
 
     media = build_assisted_gallery_media_group(
         callback.from_user.first_name or "Пользователь", pick
     )
     ok = await safe_send_assisted_gallery_media_group(callback, media)
     if ok:
-        data_buttons.append(
-            (
-                f"✅ Пример № {number}: {pick.display_title}",
-                make_ag_lead_callback(pick),
-            )
+        await callback.message.answer(
+            text="👇 Нажмите кнопку, чтобы получить расчёт цены под ключ в РБ:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=f"✅ Пример № {number}: {pick.display_title}",
+                            callback_data=make_ag_lead_callback(pick),
+                            style=ButtonStyle.PRIMARY,
+                        )
+                    ]
+                ]
+            ),
         )
         number += 1
     await asyncio.sleep(0.2)
-    return data_buttons, number
+    return ok, number
 
 
 @assisted_selection_router.callback_query(
@@ -115,19 +127,19 @@ async def process_budget_button_press(
     )
     await state.clear()
 
-    data_buttons, _ = await _send_one_assisted_gallery_pick(
+    ok, next_number = await _send_one_assisted_gallery_pick(
         callback,
         body_style=body_style,
         budget=budget,
         number=1,
     )
 
-    if not data_buttons:
+    if not ok:
         await callback.message.answer(
             text=LEXICON_RU["assisted_gallery_empty_text"],
             reply_markup=create_choice_keyboard(
                 "new_search_button_assisted",
-                "application_for_selection_button",
+                ("application_for_selection_button", ButtonStyle.SUCCESS),
                 width=1,
             ),
         )
@@ -136,16 +148,13 @@ async def process_budget_button_press(
     await state.update_data(
         body_style=body_style,
         budget=budget,
-        old_data_buttons=data_buttons,
-        number=len(data_buttons) + 1,
+        number=next_number,
         search_type="assisted",
     )
 
     await callback.message.answer(
         text=LEXICON_RU["assisted_gallery_result_text"],
-        reply_markup=create_auto_keyboard(
-            data_buttons, else_car=True, search_type="assisted"
-        ),
+        reply_markup=create_auto_keyboard(else_car=True, search_type="assisted"),
     )
 
 
@@ -161,7 +170,6 @@ async def process_else_car_button_press(
     user_data = await state.get_data()
     body_style = user_data.get("body_style")
     budget = user_data.get("budget")
-    old_data_buttons = user_data.get("old_data_buttons", [])
     number = user_data.get("number", 1)
 
     if not body_style or not budget:
@@ -169,44 +177,40 @@ async def process_else_car_button_press(
             text=LEXICON_RU["no_more_cars_text"],
             reply_markup=create_choice_keyboard(
                 "new_search_button_assisted",
-                "application_for_selection_button",
+                ("application_for_selection_button", ButtonStyle.SUCCESS),
                 width=1,
             ),
         )
         return
 
-    new_buttons, number = await _send_one_assisted_gallery_pick(
+    ok, next_number = await _send_one_assisted_gallery_pick(
         callback,
         body_style=body_style,
         budget=budget,
         number=number,
     )
 
-    if not new_buttons:
+    if not ok:
         await callback.message.answer(
             text=LEXICON_RU["assisted_gallery_empty_text"],
             reply_markup=create_choice_keyboard(
                 "new_search_button_assisted",
-                "application_for_selection_button",
+                ("application_for_selection_button", ButtonStyle.SUCCESS),
                 width=1,
             ),
         )
         return
 
-    all_data_buttons = old_data_buttons + new_buttons
     await state.update_data(
         body_style=body_style,
         budget=budget,
-        old_data_buttons=all_data_buttons,
-        number=number,
+        number=next_number,
         search_type="assisted",
     )
 
     await callback.message.answer(
         text=LEXICON_RU["assisted_gallery_result_text"],
-        reply_markup=create_auto_keyboard(
-            all_data_buttons, else_car=True, search_type="assisted"
-        ),
+        reply_markup=create_auto_keyboard(else_car=True, search_type="assisted"),
     )
 
 
