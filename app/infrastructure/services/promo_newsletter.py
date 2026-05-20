@@ -313,6 +313,21 @@ async def send_instagram_promo_to_expired_user(
         )
 
 
+async def reset_user_promo_queues(user_id: int, redis_client: redis.Redis) -> None:
+    """Перезаписывает TTL очередей неактивности и консультации одним pipeline.
+
+    SETEX перезаписывает значение и сбрасывает TTL — отдельный DEL не нужен.
+    Все ключи отправляются за один RTT.
+    """
+    try:
+        async with redis_client.pipeline(transaction=False) as pipe:
+            pipe.setex(f"inactivity_10m:{user_id}", 600, "pending")
+            pipe.setex(f"consultation_24h:{user_id}", 86400, "pending")
+            await pipe.execute()
+    except Exception as e:
+        logger.error(f"Error resetting promo queues for user {user_id}: {e}")
+
+
 async def add_user_to_promo_queue(user_id: int, redis_client: redis.Redis) -> None:
     """Добавляет пользователя в очередь на промо-рассылку через 48 часов"""
     try:

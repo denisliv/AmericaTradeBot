@@ -15,6 +15,7 @@ from app.bot.keyboards.keyboards_reply import create_call_request_keyboard
 from app.bot.states.states import FSMFillAssistedSelectionForm, FSMFillPhoneForm
 from app.infrastructure.database.db import (
     add_assisted_selection_request,
+    record_metric_event,
 )
 from app.infrastructure.services.assisted_gallery import (
     build_assisted_gallery_media_group,
@@ -33,7 +34,10 @@ assisted_selection_router: Router = Router()
     F.data.in_({"advice_button", "new_search_button_assisted"}),
     flags={"blocking": "blocking"},
 )
-async def process_advice_button_press(callback: CallbackQuery, state: FSMContext):
+async def process_advice_button_press(
+    callback: CallbackQuery, state: FSMContext, conn: AsyncConnection
+):
+    await state.clear()
     await callback.message.edit_text(
         text="Укажите предпочтительный кузов автомобиля:",
         reply_markup=create_choice_keyboard(
@@ -41,6 +45,12 @@ async def process_advice_button_press(callback: CallbackQuery, state: FSMContext
         ),
     )
     await callback.answer()
+    if conn is not None:
+        await record_metric_event(
+            conn,
+            event_name="assisted_flow_started",
+            user_id=callback.from_user.id,
+        )
     await state.set_state(FSMFillAssistedSelectionForm.get_body_style)
 
 
@@ -133,6 +143,13 @@ async def process_budget_button_press(
         budget=budget,
         number=1,
     )
+    if conn is not None:
+        await record_metric_event(
+            conn,
+            event_name="assisted_completed_search",
+            user_id=callback.from_user.id,
+            value=1.0 if ok else 0.0,
+        )
 
     if not ok:
         await callback.message.answer(
@@ -215,7 +232,9 @@ async def process_else_car_button_press(
 
 
 @assisted_selection_router.callback_query(F.data.startswith("ag_lead|"))
-async def process_assisted_gallery_lead(callback: CallbackQuery, state: FSMContext):
+async def process_assisted_gallery_lead(
+    callback: CallbackQuery, state: FSMContext, conn: AsyncConnection
+):
     parsed = parse_ag_lead_callback(callback.data)
     if not parsed:
         await callback.answer()
@@ -224,7 +243,20 @@ async def process_assisted_gallery_lead(callback: CallbackQuery, state: FSMConte
     _car_folder, body_ru, budget_ru, display_title = parsed
     name = callback.from_user.first_name or "Пользователь"
 
+    if conn is not None:
+        await record_metric_event(
+            conn,
+            event_name="assisted_clicked_lot",
+            user_id=callback.from_user.id,
+        )
+
     if callback.from_user.username:
+        if conn is not None:
+            await record_metric_event(
+                conn,
+                event_name="assisted_lead_sent",
+                user_id=callback.from_user.id,
+            )
         await bitrix_send_data(
             tg_login=callback.from_user.username,
             tg_id=callback.from_user.id,

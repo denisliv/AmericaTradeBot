@@ -24,6 +24,8 @@ def _chat_openai_kwargs(config: Config) -> dict:
         "model_name": config.openai.model_name,
         "temperature": 0.4,
         "max_tokens": 4800,
+        "timeout": 30,
+        "max_retries": 2,
     }
     if config.openai.model_name.startswith("gpt-5"):
         kwargs["reasoning_effort"] = "low"
@@ -59,15 +61,16 @@ class AIManagerService:
             cars_catalog_path=cars_md,
         )
 
+    async def aensure_index(self) -> None:
+        """Asynchronously warm up the FAISS index (non-blocking on event loop)."""
         try:
-            self.knowledge_base.ensure_index()
+            await self.knowledge_base.aensure_index()
         except Exception as exc:
             logger.exception("Failed to initialize AI manager index: %s", exc)
 
     def is_valid_api_key(self) -> bool:
         """Checks if AI manager LLM key is configured."""
-        api_key = self.config.openai.api_key.strip()
-        return api_key != "" and api_key != "your-openai-api-key-here"
+        return bool(self.config.openai.api_key.strip())
 
     async def get_reply(
         self,

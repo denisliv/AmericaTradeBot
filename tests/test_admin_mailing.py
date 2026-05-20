@@ -1,16 +1,16 @@
 import pytest
 
-from app.bot.handlers.admin_mailing import _mailing_payload_from_state
+from app.bot.handlers.admin_mailing._common import mailing_payload_from_state
 from app.infrastructure.services.admin_mailing_sender import AdminMailingSender
 
 
 def test_mailing_payload_from_state_requires_chat_id():
     with pytest.raises(ValueError, match="chat_id"):
-        _mailing_payload_from_state({"message_id": 10})
+        mailing_payload_from_state({"message_id": 10})
 
 
 def test_mailing_payload_from_state_keeps_album_without_message_id():
-    payload = _mailing_payload_from_state(
+    payload = mailing_payload_from_state(
         {
             "chat_id": "123",
             "media_items": [{"type": "photo", "file_id": "abc"}],

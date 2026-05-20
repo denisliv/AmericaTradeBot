@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from psycopg import AsyncConnection
+from psycopg import AsyncConnection, sql
 from psycopg_pool import AsyncConnectionPool
 
 from app.bot.enums.roles import UserRole
@@ -11,17 +11,10 @@ from app.infrastructure.database.orm_models import (
     SelfSelectionRow,
     UserRow,
 )
-from app.infrastructure.database.schema import METRICS_TABLES_SQL
 
 logger = logging.getLogger(__name__)
 
 STATS_TZ = "Europe/Moscow"
-
-
-async def ensure_metrics_tables(conn: AsyncConnection) -> None:
-    async with conn.cursor() as cursor:
-        for query in METRICS_TABLES_SQL:
-            await cursor.execute(query)
 
 
 async def record_metric_event(
@@ -114,332 +107,66 @@ async def record_delivery_metric_with_pool(
         )
 
 
-def _rate(numerator: float, denominator: float) -> float:
-    if denominator <= 0:
-        return 0.0
-    return round((numerator / denominator) * 100.0, 2)
+_METRICS_MATERIALIZED_VIEWS = (
+    "mv_events_hourly",
+    "mv_delivery_hourly",
+    "mv_users_daily",
+    "mv_self_funnel_daily",
+    "mv_llm_funnel_daily",
+)
 
 
-def _avg(total: float, count: float) -> float:
-    if count <= 0:
-        return 0.0
-    return round(total / count, 2)
+async def refresh_metrics_materialized_views(conn: AsyncConnection) -> None:
+    """Обновляет агрегированные представления для Grafana.
 
-
-def _period_dict(row: tuple) -> dict[str, float]:
-    return {
-        "today": float(row[0] or 0),
-        "d7": float(row[1] or 0),
-        "d30": float(row[2] or 0),
-        "all_time": float(row[3] or 0),
-    }
-
-
-async def _fetch_period_metric(
-    conn: AsyncConnection,
-    query: str,
-    params: dict,
-) -> dict[str, float]:
+    Использует CONCURRENTLY, чтобы не блокировать чтение во время refresh.
+    Это требует уникального индекса на каждом view — создаются в миграции 0003.
+    """
+    await conn.set_autocommit(True)
     async with conn.cursor() as cursor:
-        await cursor.execute(query, params=params)
+        for view in _METRICS_MATERIALIZED_VIEWS:
+            try:
+                await cursor.execute(
+                    f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view};"
+                )
+            except Exception as exc:
+                logger.warning("Failed to refresh %s: %s", view, exc)
+
+
+async def get_admin_kpi_summary(conn: AsyncConnection) -> dict[str, float | int]:
+    """4 ключевых KPI для админ-панели: ссылка на детали — в Grafana."""
+    async with conn.cursor() as cursor:
+        await cursor.execute(
+            """
+            SELECT
+                COUNT(*)::bigint AS total_users,
+                COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE)::bigint
+                    AS registered_today,
+                COUNT(*) FILTER (WHERE active_car_count > 0)::bigint
+                    AS users_with_subscription,
+                COALESCE(
+                    AVG(active_car_count) FILTER (WHERE active_car_count > 0),
+                    0
+                )::double precision AS avg_cars_per_subscription
+            FROM users
+            WHERE banned = false;
+            """
+        )
         row = await cursor.fetchone()
+
     if not row:
-        return {"today": 0.0, "d7": 0.0, "d30": 0.0, "all_time": 0.0}
-    return _period_dict(row)
-
-
-async def get_admin_dashboard_stats(
-    conn: AsyncConnection,
-    *,
-    tz: str = STATS_TZ,
-) -> dict[str, dict[str, float]]:
-    """
-    Расширенные агрегаты админ-дашборда в разрезе периодов:
-    today / d7 / d30 / all_time.
-    """
-    period_sql = """
-        COUNT(*) FILTER (
-            WHERE (timezone(%(tz)s, created_at))::date = (timezone(%(tz)s, now()))::date
-        )::bigint,
-        COUNT(*) FILTER (
-            WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 6)
-        )::bigint,
-        COUNT(*) FILTER (
-            WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 29)
-        )::bigint,
-        COUNT(*)::bigint
-    """
-    period_sql_sum = """
-        COALESCE(SUM(value) FILTER (
-            WHERE (timezone(%(tz)s, created_at))::date = (timezone(%(tz)s, now()))::date
-        ), 0),
-        COALESCE(SUM(value) FILTER (
-            WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 6)
-        ), 0),
-        COALESCE(SUM(value) FILTER (
-            WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 29)
-        ), 0),
-        COALESCE(SUM(value), 0)
-    """
-    params = {"tz": tz}
-
-    users_total = await _fetch_period_metric(
-        conn,
-        f"SELECT {period_sql} FROM users;",
-        params,
-    )
-    users_banned = await _fetch_period_metric(
-        conn,
-        f"SELECT {period_sql} FROM users WHERE banned = true;",
-        params,
-    )
-    users_inactive = await _fetch_period_metric(
-        conn,
-        f"SELECT {period_sql} FROM users WHERE is_alive = false;",
-        params,
-    )
-    users_active = await _fetch_period_metric(
-        conn,
-        """
-        SELECT
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, last_activity))::date = (timezone(%(tz)s, now()))::date
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, last_activity))::date >= ((timezone(%(tz)s, now()))::date - 6)
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, last_activity))::date >= ((timezone(%(tz)s, now()))::date - 29)
-            )::bigint,
-            COUNT(*)::bigint
-        FROM users;
-        """,
-        params,
-    )
-    subscriptions_total = await _fetch_period_metric(
-        conn,
-        f"SELECT {period_sql} FROM self_selection_requests WHERE subscription = true;",
-        params,
-    )
-
-    llm_messages = await _fetch_period_metric(
-        conn,
-        f"SELECT {period_sql} FROM chat_history WHERE role = 'user';",
-        params,
-    )
-
-    self_requests = await _fetch_period_metric(
-        conn,
-        f"SELECT {period_sql} FROM self_selection_requests;",
-        params,
-    )
-
-    def event_count(name: str) -> str:
-        return (
-            f"SELECT {period_sql} FROM bot_metrics_events WHERE event_name = %(event_name)s;"
-        )
-
-    def event_sum(name: str) -> str:
-        return f"SELECT {period_sql_sum} FROM bot_metrics_events WHERE event_name = %(event_name)s;"
-
-    funnel_started = await _fetch_period_metric(
-        conn, event_count("self_flow_started"), {**params, "event_name": "self_flow_started"}
-    )
-    funnel_year = await _fetch_period_metric(
-        conn, event_count("self_reached_year_step"), {**params, "event_name": "self_reached_year_step"}
-    )
-    funnel_auction = await _fetch_period_metric(
-        conn, event_count("self_reached_auction_step"), {**params, "event_name": "self_reached_auction_step"}
-    )
-    funnel_completed = await _fetch_period_metric(
-        conn, event_count("self_completed_search"), {**params, "event_name": "self_completed_search"}
-    )
-    clicked_lot = await _fetch_period_metric(
-        conn, event_count("self_clicked_lot"), {**params, "event_name": "self_clicked_lot"}
-    )
-    leads_self = await _fetch_period_metric(
-        conn, event_count("self_lead_sent"), {**params, "event_name": "self_lead_sent"}
-    )
-
-    subscriptions_created = await _fetch_period_metric(
-        conn,
-        event_count("self_subscription_created"),
-        {**params, "event_name": "self_subscription_created"},
-    )
-    llm_chat_started = await _fetch_period_metric(
-        conn, event_count("llm_chat_started"), {**params, "event_name": "llm_chat_started"}
-    )
-    llm_lead_sent = await _fetch_period_metric(
-        conn, event_count("llm_lead_sent"), {**params, "event_name": "llm_lead_sent"}
-    )
-
-    searches_with_results = await _fetch_period_metric(
-        conn,
-        event_count("self_search_with_results"),
-        {**params, "event_name": "self_search_with_results"},
-    )
-    searches_without_results = await _fetch_period_metric(
-        conn,
-        event_count("self_search_without_results"),
-        {**params, "event_name": "self_search_without_results"},
-    )
-    cars_shown_sum = await _fetch_period_metric(
-        conn,
-        event_sum("self_cars_shown"),
-        {**params, "event_name": "self_cars_shown"},
-    )
-    all_models_usage = await _fetch_period_metric(
-        conn,
-        event_count("self_all_models_selected"),
-        {**params, "event_name": "self_all_models_selected"},
-    )
-
-    def delivery_count(category: str, status: str) -> str:
-        return f"""
-            SELECT {period_sql}
-            FROM bot_delivery_metrics
-            WHERE category = %(category)s AND status = %(status)s;
-        """
-
-    newsletter_sent = await _fetch_period_metric(
-        conn,
-        delivery_count("subscription_newsletter", "sent"),
-        {**params, "category": "subscription_newsletter", "status": "sent"},
-    )
-    newsletter_failed = await _fetch_period_metric(
-        conn,
-        delivery_count("subscription_newsletter", "failed"),
-        {**params, "category": "subscription_newsletter", "status": "failed"},
-    )
-    newsletter_retried = await _fetch_period_metric(
-        conn,
-        delivery_count("subscription_newsletter", "retried"),
-        {**params, "category": "subscription_newsletter", "status": "retried"},
-    )
-    promo_sent = await _fetch_period_metric(
-        conn,
-        """
-        SELECT
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date = (timezone(%(tz)s, now()))::date
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 6)
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 29)
-            )::bigint,
-            COUNT(*)::bigint
-        FROM bot_delivery_metrics
-        WHERE category IN ('promo_48h', 'promo_instagram', 'promo_consultation') AND status = 'sent';
-        """,
-        params,
-    )
-    promo_failed = await _fetch_period_metric(
-        conn,
-        """
-        SELECT
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date = (timezone(%(tz)s, now()))::date
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 6)
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 29)
-            )::bigint,
-            COUNT(*)::bigint
-        FROM bot_delivery_metrics
-        WHERE category IN ('promo_48h', 'promo_instagram', 'promo_consultation') AND status = 'failed';
-        """,
-        params,
-    )
-
-    blocked_or_deactivated = await _fetch_period_metric(
-        conn,
-        """
-        SELECT
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date = (timezone(%(tz)s, now()))::date
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 6)
-            )::bigint,
-            COUNT(*) FILTER (
-                WHERE (timezone(%(tz)s, created_at))::date >= ((timezone(%(tz)s, now()))::date - 29)
-            )::bigint,
-            COUNT(*)::bigint
-        FROM bot_delivery_metrics
-        WHERE status IN ('blocked', 'deactivated');
-        """,
-        params,
-    )
-
-    invalid_callbacks = await _fetch_period_metric(
-        conn, event_count("invalid_callback"), {**params, "event_name": "invalid_callback"}
-    )
-    handler_exceptions = await _fetch_period_metric(
-        conn,
-        event_count("handler_exception"),
-        {**params, "event_name": "handler_exception"},
-    )
-    db_errors = await _fetch_period_metric(
-        conn, event_count("db_error"), {**params, "event_name": "db_error"}
-    )
-    redis_listener_restarts = await _fetch_period_metric(
-        conn,
-        event_count("redis_listener_restart"),
-        {**params, "event_name": "redis_listener_restart"},
-    )
-
-    periods = ("today", "d7", "d30", "all_time")
-    conversion = {
-        "search_to_subscription_rate": {},
-        "search_to_lead_rate": {},
-        "llm_to_lead_rate": {},
-        "avg_cars_shown_per_search": {},
-    }
-    for p in periods:
-        conversion["search_to_subscription_rate"][p] = _rate(
-            subscriptions_created[p], funnel_completed[p]
-        )
-        conversion["search_to_lead_rate"][p] = _rate(leads_self[p], funnel_completed[p])
-        conversion["llm_to_lead_rate"][p] = _rate(llm_lead_sent[p], llm_chat_started[p])
-        conversion["avg_cars_shown_per_search"][p] = _avg(
-            cars_shown_sum[p], searches_with_results[p]
-        )
+        return {
+            "total_users": 0,
+            "registered_today": 0,
+            "users_with_subscription": 0,
+            "avg_cars_per_subscription": 0.0,
+        }
 
     return {
-        "users_total": users_total,
-        "users_banned": users_banned,
-        "users_inactive": users_inactive,
-        "users_active": users_active,
-        "subscriptions_total": subscriptions_total,
-        "llm_messages": llm_messages,
-        "self_requests": self_requests,
-        "funnel_started": funnel_started,
-        "funnel_reached_year": funnel_year,
-        "funnel_reached_auction": funnel_auction,
-        "funnel_completed": funnel_completed,
-        "clicked_lot": clicked_lot,
-        "leads_self": leads_self,
-        "subscriptions_created": subscriptions_created,
-        "llm_chat_started": llm_chat_started,
-        "llm_lead_sent": llm_lead_sent,
-        "searches_with_results": searches_with_results,
-        "searches_without_results": searches_without_results,
-        "all_models_usage": all_models_usage,
-        "newsletter_sent": newsletter_sent,
-        "newsletter_failed": newsletter_failed,
-        "newsletter_retried": newsletter_retried,
-        "promo_sent": promo_sent,
-        "promo_failed": promo_failed,
-        "blocked_or_deactivated": blocked_or_deactivated,
-        "invalid_callbacks": invalid_callbacks,
-        "handler_exceptions": handler_exceptions,
-        "db_errors": db_errors,
-        "redis_listener_restarts": redis_listener_restarts,
-        "conversion": conversion,
+        "total_users": int(row[0] or 0),
+        "registered_today": int(row[1] or 0),
+        "users_with_subscription": int(row[2] or 0),
+        "avg_cars_per_subscription": round(float(row[3] or 0), 2),
     }
 
 
@@ -805,16 +532,19 @@ async def set_subscription(
                 )
                 return limit
 
+            table_ident = sql.Identifier(table)
             # Находим последнюю запись пользователя (блокируем строку запроса).
             await cursor.execute(
-                query="""
+                query=sql.SQL(
+                    """
                     SELECT id, subscription
                     FROM {table}
                     WHERE user_id = %s AND brand IS NOT NULL
                     ORDER BY created_at DESC
                     LIMIT 1
                     FOR UPDATE;
-                """.format(table=table),
+                    """
+                ).format(table=table_ident),
                 params=(user_id,),
             )
             result = await cursor.fetchone()
@@ -832,11 +562,13 @@ async def set_subscription(
                 return current_count
 
             await cursor.execute(
-                query=f"""
+                query=sql.SQL(
+                    """
                     UPDATE {table}
                     SET subscription = true
                     WHERE id = %s;
-                """,
+                    """
+                ).format(table=table_ident),
                 params=(request_id,),
             )
 

@@ -1,9 +1,11 @@
-# AmericaTrade: PostgreSQL + Redis + Telegram-бот
+# AmericaTrade: PostgreSQL + Redis + Telegram-бот + Grafana
 # 1) Скопируйте env.example в .env и задайте секреты (BOT_TOKEN, API_KEY, пароли).
 # 2) Для Docker выставьте POSTGRES_HOST=postgres, REDIS_HOST=redis (см. env.example).
-# 3) Первый запуск: применить миграции, затем поднять стек:
-#    docker compose run --rm bot python migrations/create_tables.py
+# 3) Первый запуск:
+#    docker compose run --rm bot alembic upgrade head
 #    docker compose up -d
+# 4) Grafana доступна на http://localhost:3000 (логин из GRAFANA_ADMIN_USER/PASSWORD).
+#    В проде порт 3000 наружу не пробрасывайте — заведите reverse-proxy / SSH-туннель.
 #
 name: americatrade
 
@@ -52,7 +54,36 @@ services:
       - ai_data:/app/data/vectorstore/ai_manager
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # ROOT_URL и COOKIE_SECURE подхватываются из .env — позволяет одним
+      # переключением переехать с localhost на https://<host> без правки compose.
+      GF_SERVER_ROOT_URL: ${GRAFANA_PUBLIC_URL_BASE:-http://localhost:3000}
+      GF_SECURITY_COOKIE_SECURE: ${GRAFANA_COOKIE_SECURE:-false}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   ai_data:
+  grafana_data:

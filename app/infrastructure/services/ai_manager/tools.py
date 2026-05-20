@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import logging
 import random
 import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
-import aiofiles
 import aiohttp
 from psycopg import AsyncConnection
 
@@ -22,12 +20,11 @@ from app.infrastructure.services.ai_manager.cars_catalog import (
 )
 from app.infrastructure.services.ai_manager.schemas import CarCard, CollectedInfo
 from app.infrastructure.services.bitrix_utils import bitrix_send_data
+from app.infrastructure.services.salesdata_cache import sales_data_cache
 from app.infrastructure.services.utils import get_images
 from app.lexicon.lexicon_ru import LEXICON_EN_RU
 
 logger = logging.getLogger(__name__)
-
-_CSV_PATH = "data/salesdata.csv"
 _COPART_LOT_URL = "https://www.copart.com/lot/{lot}/"
 _MILES_TO_KM = 1.60934
 _LOT_NUMBER_RE = re.compile(r"\b(\d{7,10})\b")
@@ -70,14 +67,9 @@ class AIManagerTools:
                 ),
             )
 
-        try:
-            async with aiofiles.open(_CSV_PATH, mode="r", encoding="utf-8") as csvfile:
-                csv_lines = await csvfile.readlines()
-        except FileNotFoundError:
-            logger.error("salesdata.csv not found at %s", _CSV_PATH)
+        all_rows = await sales_data_cache.get_rows()
+        if not all_rows:
             return ToolResult(ok=False, message="Каталог авто временно недоступен.")
-
-        all_rows = list(csv.DictReader(csv_lines))
 
         # Progressive broadening: each tier relaxes one more constraint.
         # We stop as soon as any tier has matches.
@@ -155,14 +147,11 @@ class AIManagerTools:
         if not lot_number:
             return ToolResult(ok=False, message="Не вижу номер лота в сообщении.")
 
-        try:
-            async with aiofiles.open(_CSV_PATH, mode="r", encoding="utf-8") as csvfile:
-                csv_lines = await csvfile.readlines()
-        except FileNotFoundError:
-            logger.error("salesdata.csv not found at %s", _CSV_PATH)
+        rows = await sales_data_cache.get_rows()
+        if not rows:
             return ToolResult(ok=False, message="Каталог авто временно недоступен.")
 
-        for row in csv.DictReader(csv_lines):
+        for row in rows:
             if str(row.get("Lot number") or "").strip() != lot_number:
                 continue
             preview = (row.get("Image Thumbnail") or "").strip()
@@ -209,14 +198,11 @@ class AIManagerTools:
 
         row: dict[str, Any] | None = None
         if lot_number:
-            try:
-                async with aiofiles.open(_CSV_PATH, mode="r", encoding="utf-8") as csvfile:
-                    csv_lines = await csvfile.readlines()
-            except FileNotFoundError:
-                logger.error("salesdata.csv not found at %s", _CSV_PATH)
+            rows = await sales_data_cache.get_rows()
+            if not rows:
                 return ToolResult(ok=False, message="Каталог авто временно недоступен.")
 
-            for candidate in csv.DictReader(csv_lines):
+            for candidate in rows:
                 if str(candidate.get("Lot number") or "").strip() == lot_number:
                     row = candidate
                     break
@@ -306,17 +292,14 @@ class AIManagerTools:
     ) -> ToolResult:
         if not brand or not model:
             return ToolResult(ok=False, message="Нужны марка и модель для проверки характеристик.")
-        try:
-            async with aiofiles.open(_CSV_PATH, mode="r", encoding="utf-8") as csvfile:
-                csv_lines = await csvfile.readlines()
-        except FileNotFoundError:
-            logger.error("salesdata.csv not found at %s", _CSV_PATH)
+        all_rows = await sales_data_cache.get_rows()
+        if not all_rows:
             return ToolResult(ok=False, message="Каталог авто временно недоступен.")
 
         rows: list[dict[str, Any]] = []
         brand_norm = brand.strip().lower()
         model_norm = model.strip().lower()
-        for row in csv.DictReader(csv_lines):
+        for row in all_rows:
             make = (row.get("Make") or "").strip().lower()
             model_group = (row.get("Model Group") or "").strip().lower()
             model_detail = (row.get("Model Detail") or "").strip().lower()

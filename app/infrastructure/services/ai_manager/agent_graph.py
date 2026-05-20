@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from cachetools import TTLCache
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -166,8 +167,11 @@ class AIManagerGraphService:
             checkpointer=None,
             version="v2",
         )
-        # Last auction cards shown in-session (per user_id), for lead hydration
-        self._session_last_shown: dict[int, list[dict[str, Any]]] = {}
+        # Last auction cards shown in-session (per user_id), for lead hydration.
+        # TTLCache keeps memory bounded even when many distinct users use the chat.
+        self._session_last_shown: TTLCache[int, list[dict[str, Any]]] = TTLCache(
+            maxsize=10_000, ttl=1800
+        )
 
     async def run(
         self,

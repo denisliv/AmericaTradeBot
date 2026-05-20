@@ -11,6 +11,7 @@ internals). This path is canonical for langchain and avoids the
 "Normalizing L2 is not applicable for metric type ..." warning.
 """
 
+import asyncio
 import hashlib
 import logging
 from pathlib import Path
@@ -56,8 +57,26 @@ class KnowledgeBaseService:
             api_key=embeddings_api_key,
             base_url=embeddings_base_url,
             model=embeddings_model_name,
+            timeout=30,
+            max_retries=2,
         )
         self.vector_store: FAISS | None = None
+        self._index_lock = asyncio.Lock()
+
+    async def aensure_index(self) -> None:
+        """Async wrapper around blocking FAISS load/build, safe for concurrent callers."""
+        if self.vector_store is not None:
+            return
+        async with self._index_lock:
+            if self.vector_store is not None:
+                return
+            await asyncio.to_thread(self.ensure_index)
+
+    async def retrieve(self, query: str, *, k: int) -> list[dict[str, str]]:
+        """Async cosine-similarity retrieval over the vector store."""
+        if self.vector_store is None:
+            await self.aensure_index()
+        return await asyncio.to_thread(self._retrieve_sync, query, k)
 
     def ensure_index(self) -> None:
         """Builds/reuses the vector index, re-building on content or format changes."""
@@ -106,7 +125,7 @@ class KnowledgeBaseService:
             normalize_L2=True,
         )
 
-    def retrieve(self, query: str, *, k: int) -> list[dict[str, str]]:
+    def _retrieve_sync(self, query: str, k: int) -> list[dict[str, str]]:
         """Return chunks whose cosine similarity to the query is above threshold."""
         if not self.vector_store:
             self.ensure_index()

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from typing import Any
@@ -5,6 +6,9 @@ from typing import Any
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+_BITRIX_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5)
+_BITRIX_MAX_ATTEMPTS = 3
 
 
 def _get_bitrix_base_url() -> str:
@@ -109,22 +113,48 @@ def _build_fields(tg_login: str, tg_id: int, data: dict, method: str) -> dict:
 async def bitrix_send_data(tg_login: str, tg_id: int, data: dict, method: str) -> str:
     url = _get_bitrix_base_url()
     fields = _build_fields(tg_login, tg_id, data, method)
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=fields) as resp:
-            response = await resp.text()
-            if resp.status >= 400:
-                logger.error(
-                    "Bitrix lead request failed: status=%s method=%s body=%s",
-                    resp.status,
-                    method,
-                    response,
-                )
-                raise RuntimeError(
-                    f"Bitrix request failed with status {resp.status}: {response}"
-                )
+
+    last_error: Exception | None = None
+    async with aiohttp.ClientSession(timeout=_BITRIX_TIMEOUT) as session:
+        for attempt in range(1, _BITRIX_MAX_ATTEMPTS + 1):
             try:
-                payload = await resp.json(content_type=None)
-            except Exception:
-                payload = None
-            _raise_for_bitrix_error(payload)
-            return response
+                async with session.post(url, data=fields) as resp:
+                    response = await resp.text()
+                    if 500 <= resp.status < 600:
+                        raise aiohttp.ClientResponseError(
+                            request_info=resp.request_info,
+                            history=resp.history,
+                            status=resp.status,
+                            message=response,
+                        )
+                    if resp.status >= 400:
+                        logger.error(
+                            "Bitrix lead request failed: status=%s method=%s body=%s",
+                            resp.status,
+                            method,
+                            response,
+                        )
+                        raise RuntimeError(
+                            f"Bitrix request failed with status {resp.status}: {response}"
+                        )
+                    try:
+                        payload = await resp.json(content_type=None)
+                    except Exception:
+                        payload = None
+                    _raise_for_bitrix_error(payload)
+                    return response
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                last_error = exc
+                if attempt >= _BITRIX_MAX_ATTEMPTS:
+                    break
+                backoff = 2 ** (attempt - 1)
+                logger.warning(
+                    "Bitrix request retry %s/%s in %ss: %s",
+                    attempt,
+                    _BITRIX_MAX_ATTEMPTS,
+                    backoff,
+                    exc,
+                )
+                await asyncio.sleep(backoff)
+
+    raise RuntimeError(f"Bitrix request failed after retries: {last_error}")

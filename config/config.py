@@ -18,6 +18,8 @@ class DatabaseSettings:
     port: int
     user: str
     password: str
+    pool_min_size: int
+    pool_max_size: int
 
 
 @dataclass
@@ -62,6 +64,11 @@ class BitrixSettings:
 
 
 @dataclass
+class GrafanaSettings:
+    url: str
+
+
+@dataclass
 class AIManagerSettings:
     max_history_messages: int
     rag_top_k: int
@@ -82,6 +89,7 @@ class Config:
     openai: OpenAISettings
     embeddings: EmbeddingsSettings
     bitrix: BitrixSettings
+    grafana: GrafanaSettings
     ai_manager: AIManagerSettings
 
 
@@ -107,6 +115,8 @@ def load_config(path: str | None = None) -> Config:
         port=env.int("POSTGRES_PORT"),
         user=env("POSTGRES_USER"),
         password=env("POSTGRES_PASSWORD"),
+        pool_min_size=env.int("POSTGRES_POOL_MIN_SIZE", default=5),
+        pool_max_size=env.int("POSTGRES_POOL_MAX_SIZE", default=20),
     )
 
     redis_primary_db = env.int("REDIS_DATABASE")
@@ -129,7 +139,7 @@ def load_config(path: str | None = None) -> Config:
     copart = CopartSettings(url=env("COPART_URL"))
 
     openai = OpenAISettings(
-        api_key=env("API_KEY", default="your-openai-api-key-here"),
+        api_key=env("API_KEY"),
         base_url=env("BASE_URL", default="https://api.openai.com/v1"),
         model_name=env("MODEL_NAME", default="gpt-5-mini"),
     )
@@ -146,6 +156,12 @@ def load_config(path: str | None = None) -> Config:
             default="",
         ),
         source=env("BITRIX_SOURCE", default="AI Manager (Telegram)"),
+    )
+
+    grafana = GrafanaSettings(
+        # Публичный URL Grafana, который админ открывает по ссылке в /admin.
+        # Пусто = ссылка не показывается.
+        url=env("GRAFANA_PUBLIC_URL", default=""),
     )
 
     ai_manager = AIManagerSettings(
@@ -186,5 +202,6 @@ def load_config(path: str | None = None) -> Config:
         openai=openai,
         embeddings=embeddings,
         bitrix=bitrix,
+        grafana=grafana,
         ai_manager=ai_manager,
     )

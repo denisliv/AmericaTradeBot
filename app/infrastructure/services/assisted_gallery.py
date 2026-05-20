@@ -34,10 +34,10 @@ from typing import Final, Optional
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto
 
+from app.infrastructure.paths import ASSISTED_GALLERY_DIR
 from app.lexicon.lexicon_ru import LEXICON_ASSISTED_GALLERY_RU
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-ASSISTED_GALLERY_ROOT: Final[Path] = _PROJECT_ROOT / "data" / "assisted_gallery"
+ASSISTED_GALLERY_ROOT: Final[Path] = ASSISTED_GALLERY_DIR
 
 # callback_data Telegram ≤ 64 байт; только ASCII
 BODY_DIR: Final[dict[str, str]] = {

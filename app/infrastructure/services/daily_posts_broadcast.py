@@ -15,12 +15,10 @@ from app.infrastructure.database.db import (
     get_broadcast_recipients,
     record_delivery_metric_with_pool,
 )
+from app.infrastructure.paths import POSTS_DIR
 from app.infrastructure.services.subscription_newsletter import NewsletterQueue
 
 logger = logging.getLogger(__name__)
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-POSTS_DIR = _PROJECT_ROOT / "data" / "posts"
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 

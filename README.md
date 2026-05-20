@@ -23,7 +23,13 @@ AmericaTrade/
 │   └── lexicon/                # Тексты бота
 ├── config/                       # Загрузка настроек из переменных окружения
 ├── data/                         # Контент (posts, ai_manager, CSV), векторное хранилище
-├── migrations/                   # Создание таблиц PostgreSQL
+├── alembic/                      # Миграции схемы БД (Alembic)
+│   ├── env.py
+│   └── versions/
+├── alembic.ini
+├── grafana/                      # Dashboards и provisioning для Grafana
+│   ├── dashboards/
+│   └── provisioning/
 ├── tests/                        # Pytest
 ├── main.py                       # Точка входа
 ├── pyproject.toml / uv.lock      # Зависимости (uv)
@@ -41,7 +47,9 @@ AmericaTrade/
 - **LangChain / LangGraph** — оркестрация AI-менеджера
 - **FAISS** — векторный индекс для RAG
 - **APScheduler** — фоновые задачи и рассылки
-- **Docker** — контейнер приложения и **Docker Compose** для полного стека (БД + Redis + бот)
+- **Alembic** — версионируемые миграции схемы PostgreSQL
+- **Grafana** — операционные и продуктовые дашборды поверх Postgres
+- **Docker** — контейнер приложения и **Docker Compose** для полного стека (БД + Redis + бот + Grafana)
 
 ## Требования
 
@@ -95,11 +103,12 @@ cp env.example .env
 Полный перечень переменных и комментарии — в **`env.example`**. Обязательно задайте как минимум:
 
 - `BOT_TOKEN`, `ADMIN_IDS`
-- `POSTGRES_*` (хост, порт, БД, пользователь, пароль)
+- `POSTGRES_*` (хост, порт, БД, пользователь, пароль). Опционально: `POSTGRES_POOL_MIN_SIZE`, `POSTGRES_POOL_MAX_SIZE` (по умолчанию 5/20)
 - `REDIS_*` (хост, порт; для промо используется отдельный номер БД: `REDIS_PROMO_DATABASE`)
-- `API_KEY` (и при необходимости блок `EMBEDDINGS_*` для другой модели/ключа)
+- `API_KEY` — **обязательная** переменная. При необходимости — блок `EMBEDDINGS_*` для другой модели/ключа
 - для AI Manager — при необходимости `AI_MANAGER_*`, пути по умолчанию смотрите в `config/config.py`
 - опционально: `BITRIX_WEBHOOK_URL`, `COPART_URL`, `LOG_LEVEL`, `LOG_FORMAT`
+- опционально: `GRAFANA_PUBLIC_URL` (ссылка из /admin), `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`
 
 ### 5. База данных
 
@@ -109,13 +118,20 @@ cp env.example .env
 CREATE DATABASE america_trade;
 ```
 
-Примените миграции:
+Примените миграции через Alembic:
 
 ```bash
-uv run python migrations/create_tables.py
+uv run alembic upgrade head
 ```
 
-Дополнительные таблицы при необходимости создаются при старте бота (например, метрики через `ensure_metrics_tables` в `app/infrastructure/database/db.py`).
+Если у вас уже есть существующая БД, схема которой была создана старым скриптом `migrations/create_tables.py`, отметьте начальную ревизию как применённую перед накатом новых:
+
+```bash
+uv run alembic stamp 0001
+uv run alembic upgrade head
+```
+
+Все DDL (включая таблицы метрик `bot_metrics_events`, `bot_delivery_metrics`) теперь управляются Alembic-миграциями в `alembic/versions/`. Runtime-инициализация схемы при старте бота больше не выполняется.
 
 ### 6. Запуск бота
 
@@ -132,14 +148,14 @@ uv run pytest
 
 ## Структура базы данных (основное)
 
-Точная схема задаётся в **`migrations/create_tables.py`** и **`app/infrastructure/database/schema.py`**. Среди прочего:
+Точная схема задаётся миграциями Alembic в `alembic/versions/`. Среди прочего:
 
 - **users** — пользователи бота
 - **self_selection_requests** / **assisted_selection_requests** — заявки подбора
 - **chat_history** — история сообщений для контекста
-- **bot_metrics_events**, **bot_delivery_metrics** — метрики (SQL из `schema.py`)
+- **bot_metrics_events**, **bot_delivery_metrics** — метрики
 
-Остальные объекты (подписки, рассылки и т.д.) описаны и создаются в коде БД-слоя по мере развития проекта.
+Временная таблица **admin_mailing** создаётся/удаляется в рантайме перед каждой админ-рассылкой (`admin_mailing_prepare_for_broadcast` в `app/infrastructure/database/db.py`).
 
 ## Основные компоненты
 
@@ -158,6 +174,37 @@ uv run pytest
 ## Планировщик и фоновые задачи
 
 Используется **APScheduler**: обновление данных (CSV), рассылки подписчикам, промо и связанные задачи (см. `app/bot/scheduler.py` и сервисы рассылок).
+
+## Метрики и Grafana
+
+Бот пишет два потока в Postgres:
+
+- `bot_metrics_events` — продуктовые события (`self_flow_started`, `self_completed_search`, `llm_lead_sent`, `ai_rag_hit`, `telegram_retry_after` и т.п.). Колонка `value` хранит payload — например, количество найденных авто для `self_completed_search` или длительность retry-after.
+- `bot_delivery_metrics` — категория/статус/`duration_ms` для рассылок и LLM-ответов (`category='llm_chat'`, `status='ok'` или `'error'`).
+
+Поверх таблиц поднимаются 5 materialized views (см. миграцию `0003_metrics_views.py`):
+
+- `mv_events_hourly`, `mv_delivery_hourly` — почасовые агрегаты для realtime-графиков
+- `mv_users_daily` — регистрации, активность, подписчики по дням
+- `mv_self_funnel_daily`, `mv_llm_funnel_daily` — воронки self-selection и LLM-чата
+
+Views обновляются `REFRESH MATERIALIZED VIEW CONCURRENTLY` раз в 5 минут через APScheduler-job `metrics_mv_refresh`. AI Manager метрики флашатся в `bot_metrics_events` раз в минуту job-ом `ai_manager_metrics_flush`.
+
+### Grafana
+
+Контейнер `grafana` поднимается рядом с ботом в `docker-compose.yml`. Datasource и стартовый дашборд провизионятся из `grafana/provisioning/` и `grafana/dashboards/`.
+
+```bash
+docker compose up -d grafana
+# Откройте http://localhost:3000 (через SSH-туннель в продакшене)
+# Логин/пароль — GRAFANA_ADMIN_USER / GRAFANA_ADMIN_PASSWORD из .env
+```
+
+После открытия дашборда `AmericaTrade Bot — Overview` поставьте публичный URL (например, `https://grafana.example.com/d/americatrade-overview`) в `.env` как `GRAFANA_PUBLIC_URL` — он отобразится как ссылка в `/admin → Статистика`.
+
+### Админ-сводка
+
+В `/admin → Статистика` бот возвращает только 4 KPI: всего пользователей, регистрации сегодня, с активной подпиской, среднее число авто на подписку. Подробная аналитика и графики — в Grafana по ссылке.
 
 ## Безопасность и лимиты
 
@@ -212,13 +259,20 @@ docker compose build
 
 ### Шаг 5. Применить миграции (первый запуск и после смены DDL)
 
-Поднимутся зависимости (Postgres/Redis), выполнится скрипт миграций:
+Поднимутся зависимости (Postgres/Redis), выполнится команда миграций:
 
 ```bash
-docker compose run --rm bot python migrations/create_tables.py
+docker compose run --rm bot alembic upgrade head
 ```
 
-Убедитесь в логах, что таблицы созданы без ошибок.
+Для миграции с уже существующей БД (схема создана старым `migrations/create_tables.py`):
+
+```bash
+docker compose run --rm bot alembic stamp 0001
+docker compose run --rm bot alembic upgrade head
+```
+
+Убедитесь в логах, что миграции применились без ошибок.
 
 ### Шаг 6. Запустить стек в фоне
 
@@ -248,6 +302,6 @@ docker compose up -d
 ```bash
 git pull
 docker compose build
-docker compose run --rm bot python migrations/create_tables.py   # если менялись миграции
+docker compose run --rm bot alembic upgrade head   # если есть новые миграции
 docker compose up -d
 ```

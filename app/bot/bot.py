@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import signal
+import sys
 
 import psycopg_pool
 from aiogram import Bot, Dispatcher
@@ -24,19 +27,29 @@ from app.bot.middlewares.shadow_ban import ShadowBanMiddleware
 from app.bot.middlewares.throttling import ThrottlingMiddleware
 from app.bot.scheduler import create_scheduler
 from app.infrastructure.database.connection import get_pg_pool
-from app.infrastructure.database.db import ensure_metrics_tables
 from app.infrastructure.services.ai_manager.service import AIManagerService
 from config.config import Config
 
 logger = logging.getLogger(__name__)
 
 
+def _install_signal_handlers(stop_event: asyncio.Event) -> None:
+    """Регистрирует обработчики SIGINT/SIGTERM, чтобы корректно прерывать polling."""
+    if sys.platform.startswith("win") or sys.platform == "cygwin":
+        return
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+        except (NotImplementedError, RuntimeError):
+            logger.debug("Signal %s not supported on this platform", sig)
+
+
 # Функция конфигурирования и запуска бота
 async def main(config: Config) -> None:
     logger.info("Starting bot...")
-    # Инициализируем хранилище
     # Создаем Redis клиент для FSM storage
-    redis_storage = Redis(
+    redis_storage_client = Redis(
         db=config.redis.db,
         host=config.redis.host,
         port=config.redis.port,
@@ -44,9 +57,9 @@ async def main(config: Config) -> None:
         password=config.redis.password,
     )
 
-    storage = RedisStorage(redis=redis_storage)
+    storage = RedisStorage(redis=redis_storage_client)
 
-    # Создаем отдельный Redis клиент для промо-рассылок
+    # Отдельный Redis клиент для промо-логики (другая БД)
     redis = Redis(
         db=config.redis.promo_db,
         host=config.redis.host,
@@ -55,8 +68,9 @@ async def main(config: Config) -> None:
         password=config.redis.password,
     )
 
-    # Инициализируем AI-менеджер
+    # Инициализируем AI-менеджер (FAISS-индекс прогревается асинхронно)
     ai_manager_service = AIManagerService(config)
+    await ai_manager_service.aensure_index()
 
     # Инициализируем бот и диспетчер
     bot = Bot(
@@ -72,12 +86,15 @@ async def main(config: Config) -> None:
         port=config.db.port,
         user=config.db.user,
         password=config.db.password,
+        min_size=config.db.pool_min_size,
+        max_size=config.db.pool_max_size,
     )
-    async with db_pool.connection() as conn:
-        await ensure_metrics_tables(conn)
+    # DDL schema управляется Alembic: `alembic upgrade head` перед запуском.
 
     # Создаем и настраиваем планировщик
-    scheduler_manager = create_scheduler(config, bot, db_pool, redis)
+    scheduler_manager = create_scheduler(
+        config, bot, db_pool, redis, ai_manager_service=ai_manager_service
+    )
     scheduler_manager.start()
 
     # Подключаем роутеры в нужном порядке
@@ -109,14 +126,40 @@ async def main(config: Config) -> None:
     dp["ai_manager_service"] = ai_manager_service
     dp["config"] = config
 
-    # Запускаем поллинг
+    stop_event = asyncio.Event()
+    _install_signal_handlers(stop_event)
+
+    polling_task = asyncio.create_task(
+        dp.start_polling(bot, db_pool=db_pool, admin_ids=config.bot.admin_ids)
+    )
+    stop_task = asyncio.create_task(stop_event.wait())
+
     try:
-        await dp.start_polling(bot, db_pool=db_pool, admin_ids=config.bot.admin_ids)
-    except Exception as e:
-        logger.exception(e)
+        done, _ = await asyncio.wait(
+            {polling_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done:
+            logger.info("Stop signal received, shutting down...")
+            await dp.stop_polling()
+            await polling_task
+        else:
+            stop_task.cancel()
+            if polling_task.exception() is not None:
+                raise polling_task.exception()
+    except Exception:
+        logger.exception("Polling stopped with unhandled exception")
     finally:
-        # Останавливаем планировщик
-        scheduler_manager.shutdown()
-        # Закрываем пул соединений
+        await scheduler_manager.shutdown()
         await db_pool.close()
         logger.info("Connection to Postgres closed")
+        try:
+            await redis.aclose()
+        except Exception:
+            logger.exception("Error closing promo Redis client")
+        try:
+            await redis_storage_client.aclose()
+        except Exception:
+            logger.exception("Error closing FSM Redis client")
+        logger.info("Redis connections closed")
+        await bot.session.close()

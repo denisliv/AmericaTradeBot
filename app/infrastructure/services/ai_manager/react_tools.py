@@ -66,7 +66,7 @@ def make_react_tool_list(deps: ReActDependencies) -> list:
         if not (query or "").strip():
             return "Пустой запрос."
         try:
-            ctx = deps.rag.retrieve(query.strip(), k=deps.rag_top_k)
+            ctx = await deps.rag.retrieve(query.strip(), k=deps.rag_top_k)
         except Exception as exc:
             logger.warning("RAG retrieve failed: %s", exc)
             return "В базе знаний сейчас ничего не нашлось. Скажи клиенту, что уточнишь у менеджера."
@@ -275,7 +275,7 @@ def make_react_tool_list(deps: ReActDependencies) -> list:
             "доставка, таможня, договор, оплата, сроки. " + (user_question or "")
         )
         try:
-            ctx = deps.rag.retrieve(query, k=deps.rag_top_k)
+            ctx = await deps.rag.retrieve(query, k=deps.rag_top_k)
         except Exception as exc:
             logger.warning("Cost components RAG failed: %s", exc)
             ctx = []

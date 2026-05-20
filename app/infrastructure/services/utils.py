@@ -19,6 +19,8 @@ from aiogram.types import (
 )
 from aiohttp.client_exceptions import ContentTypeError
 
+from app.infrastructure.paths import SALESDATA_CSV
+from app.infrastructure.services.salesdata_cache import sales_data_cache
 from app.lexicon.lexicon_ru import LEXICON_CAPTION_RU, LEXICON_EN_RU, LEXICON_RU_CSV
 
 # Логирование
@@ -221,16 +223,10 @@ async def get_data(user_dict: dict, count: int = 6) -> List[Tuple[dict, List[str
         else None
     )
 
-    # Читаем CSV асинхронно
-    async with aiofiles.open(
-        "data/salesdata.csv", mode="r", encoding="utf-8"
-    ) as csvfile:
-        csv_lines = await csvfile.readlines()
-
-    reader = csv.DictReader(csv_lines)
+    rows = await sales_data_cache.get_rows()
     filtered = [
         row
-        for row in reader
+        for row in rows
         if match_car(row, brand, model, year, odometer, auction_status)
     ]
 
@@ -285,8 +281,8 @@ async def _write_sales_csv_atomically(filepath: str | Path, content: bytes) -> N
             tmp_path.unlink()
 
 
-async def download_csv(url: str) -> str:
-    filepath = "data/salesdata.csv"
+async def download_csv(url: str) -> Path:
+    filepath = SALESDATA_CSV
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -310,6 +306,7 @@ async def download_csv(url: str) -> str:
                     content = b"".join(chunks)
                     _validate_sales_csv_bytes(content)
                     await _write_sales_csv_atomically(filepath, content)
+                    sales_data_cache.invalidate()
 
                     logger.info(
                         f"Файл успешно загружен: {filepath} ({total_bytes} байт)"

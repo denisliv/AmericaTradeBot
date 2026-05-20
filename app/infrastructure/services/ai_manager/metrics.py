@@ -4,6 +4,8 @@ import logging
 from collections import Counter
 from dataclasses import dataclass, field
 
+from psycopg_pool import AsyncConnectionPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,6 +73,66 @@ class AIManagerMetrics:
         return (
             self.snapshot.classification_confidence_sum / self.snapshot.classifications
         )
+
+    def _drain(self) -> MetricsSnapshot:
+        """Возвращает текущий snapshot и сбрасывает счётчики до нуля.
+
+        Используется фоновым job-ом раз в минуту, чтобы записать накопленную
+        дельту в bot_metrics_events и не потерять данные при рестарте.
+        """
+        drained = self.snapshot
+        self.snapshot = MetricsSnapshot()
+        return drained
+
+    async def persist(self, db_pool: AsyncConnectionPool) -> None:
+        """Сбрасывает накопленные счётчики в bot_metrics_events.
+
+        Пишется одной транзакцией пакетным INSERT — десятки счётчиков
+        укладываются в один RTT даже при средней нагрузке.
+        """
+        snap = self._drain()
+        rows: list[tuple[str, float]] = []
+        if snap.messages_total:
+            rows.append(("ai_messages", float(snap.messages_total)))
+        if snap.rag_hits:
+            rows.append(("ai_rag_hit", float(snap.rag_hits)))
+        if snap.rag_miss:
+            rows.append(("ai_rag_miss", float(snap.rag_miss)))
+        if snap.leads_ready:
+            rows.append(("ai_lead_ready", float(snap.leads_ready)))
+        if snap.leads_sent:
+            rows.append(("ai_lead_sent", float(snap.leads_sent)))
+        if snap.leads_rejected_by_judge:
+            rows.append(("ai_lead_rejected", float(snap.leads_rejected_by_judge)))
+        if snap.cars_shown:
+            rows.append(("ai_cars_shown", float(snap.cars_shown)))
+        if snap.classifications:
+            rows.append(("ai_classification", float(snap.classifications)))
+            rows.append(
+                ("ai_classification_confidence", snap.classification_confidence_sum)
+            )
+        if snap.plan_executions:
+            rows.append(("ai_plan_execution", float(snap.plan_executions)))
+        for tool_name, count in snap.tool_counter.items():
+            rows.append((f"ai_tool:{tool_name}", float(count)))
+        for stage, count in snap.stage_counter.items():
+            rows.append((f"ai_stage:{stage}", float(count)))
+        for action, count in snap.action_counter.items():
+            rows.append((f"ai_action:{action}", float(count)))
+
+        if not rows:
+            return
+
+        try:
+            async with db_pool.connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.executemany(
+                        "INSERT INTO bot_metrics_events(event_name, value) "
+                        "VALUES (%s, %s);",
+                        rows,
+                    )
+        except Exception as e:
+            logger.warning("Failed to persist AI manager metrics: %s", e)
 
     def log_snapshot(self) -> None:
         logger.info(

@@ -10,10 +10,14 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.infrastructure.database.db import (
     get_admin_mailing_waiting_user_ids,
+    record_metric_event,
     update_admin_mailing_status,
 )
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRY_ATTEMPTS = 3
+_RETRY_TOTAL_CAP_SECONDS = 120
 
 
 class AdminMailingSender:
@@ -82,40 +86,56 @@ class AdminMailingSender:
                 description="no message_id for copy",
             )
             return False
-        try:
-            await self.bot.copy_message(
-                user_id,
-                from_chat_id,
-                message_id,
-                reply_markup=keyboard,
-            )
-        except TelegramRetryAfter as e:
-            await asyncio.sleep(e.retry_after)
-            return await self.send_message(
-                conn,
-                user_id,
-                from_chat_id,
-                message_id,
-                keyboard,
-                media_items=media_items,
-                is_album=is_album,
-                button_message_text=button_message_text,
-            )
-        except Exception as e:
-            await update_admin_mailing_status(
-                conn,
-                user_id=user_id,
-                status="unsuccessful",
-                description=str(e),
-            )
-        else:
-            await update_admin_mailing_status(
-                conn,
-                user_id=user_id,
-                status="success",
-                description="No errors",
-            )
-            return True
+
+        total_wait = 0.0
+        last_error: Exception | None = None
+        for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
+            try:
+                await self.bot.copy_message(
+                    user_id,
+                    from_chat_id,
+                    message_id,
+                    reply_markup=keyboard,
+                )
+            except TelegramRetryAfter as e:
+                last_error = e
+                await record_metric_event(
+                    conn,
+                    event_name="telegram_retry_after",
+                    user_id=user_id,
+                    value=float(e.retry_after),
+                )
+                if (
+                    attempt >= _MAX_RETRY_ATTEMPTS
+                    or total_wait + e.retry_after > _RETRY_TOTAL_CAP_SECONDS
+                ):
+                    break
+                total_wait += e.retry_after
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception as e:
+                await update_admin_mailing_status(
+                    conn,
+                    user_id=user_id,
+                    status="unsuccessful",
+                    description=str(e),
+                )
+                return False
+            else:
+                await update_admin_mailing_status(
+                    conn,
+                    user_id=user_id,
+                    status="success",
+                    description="No errors",
+                )
+                return True
+
+        await update_admin_mailing_status(
+            conn,
+            user_id=user_id,
+            status="unsuccessful",
+            description=f"retry_after exhausted: {last_error}",
+        )
         return False
 
     async def _send_album(
@@ -126,35 +146,58 @@ class AdminMailingSender:
         keyboard: InlineKeyboardMarkup | None = None,
         button_message_text: str = "👇",
     ) -> bool:
-        try:
-            media_list = self._build_media_list(media_items)
-            await self.bot.send_media_group(user_id, media=media_list)
-            if keyboard:
-                await self.bot.send_message(
-                    user_id,
-                    text=button_message_text,
-                    reply_markup=keyboard,
+        media_list = self._build_media_list(media_items)
+        total_wait = 0.0
+        last_error: Exception | None = None
+        for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
+            try:
+                await self.bot.send_media_group(user_id, media=media_list)
+                if keyboard:
+                    await self.bot.send_message(
+                        user_id,
+                        text=button_message_text,
+                        reply_markup=keyboard,
+                    )
+            except TelegramRetryAfter as e:
+                last_error = e
+                await record_metric_event(
+                    conn,
+                    event_name="telegram_retry_after",
+                    user_id=user_id,
+                    value=float(e.retry_after),
                 )
-        except TelegramRetryAfter as e:
-            await asyncio.sleep(e.retry_after)
-            return await self._send_album(
-                conn, user_id, media_items, keyboard, button_message_text
-            )
-        except Exception as e:
-            await update_admin_mailing_status(
-                conn,
-                user_id=user_id,
-                status="unsuccessful",
-                description=str(e),
-            )
-            return False
+                if (
+                    attempt >= _MAX_RETRY_ATTEMPTS
+                    or total_wait + e.retry_after > _RETRY_TOTAL_CAP_SECONDS
+                ):
+                    break
+                total_wait += e.retry_after
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception as e:
+                await update_admin_mailing_status(
+                    conn,
+                    user_id=user_id,
+                    status="unsuccessful",
+                    description=str(e),
+                )
+                return False
+            else:
+                await update_admin_mailing_status(
+                    conn,
+                    user_id=user_id,
+                    status="success",
+                    description="No errors",
+                )
+                return True
+
         await update_admin_mailing_status(
             conn,
             user_id=user_id,
-            status="success",
-            description="No errors",
+            status="unsuccessful",
+            description=f"retry_after exhausted: {last_error}",
         )
-        return True
+        return False
 
     async def broadcaster(
         self,

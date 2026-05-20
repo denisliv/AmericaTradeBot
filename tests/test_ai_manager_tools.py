@@ -1,7 +1,16 @@
 import pytest
 
+from app.infrastructure.services import salesdata_cache as _salesdata_cache_module
 from app.infrastructure.services.ai_manager import tools
 from app.infrastructure.services.ai_manager.tools import AIManagerTools
+
+
+def _use_csv(monkeypatch, csv_path) -> None:
+    """Перенаправляет глобальный sales_data_cache на тестовый файл."""
+    monkeypatch.setattr(
+        _salesdata_cache_module.sales_data_cache, "_path", csv_path
+    )
+    _salesdata_cache_module.sales_data_cache.invalidate()
 
 
 @pytest.mark.asyncio
@@ -27,7 +36,7 @@ async def test_lookup_lot_by_number_returns_card_from_csv(tmp_path, monkeypatch)
         "20260501,15000,12000,22000,https://example.com/car.jpg,,GAS\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(tools, "_CSV_PATH", str(csv_path))
+    _use_csv(monkeypatch, csv_path)
 
     result = await AIManagerTools().lookup_lot_by_number("https://www.copart.com/lot/12345678")
 
@@ -77,7 +86,7 @@ async def test_quick_vehicle_specs_uses_csv_characteristics(tmp_path, monkeypatc
         "20260502,18000,15000,26000,https://example.com/camry.jpg,,GAS\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(tools, "_CSV_PATH", str(csv_path))
+    _use_csv(monkeypatch, csv_path)
 
     result = await AIManagerTools().quick_vehicle_specs(
         brand="Tesla",
@@ -107,7 +116,7 @@ async def test_estimate_landed_cost_for_ev_lot_uses_known_csv_price_and_zero_cus
         "6072,,FWD,AUTOMATIC,20260428,7899,6200,30000,https://example.com/equinox.jpg,,ELECTRIC\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(tools, "_CSV_PATH", str(csv_path))
+    _use_csv(monkeypatch, csv_path)
 
     result = await AIManagerTools().estimate_landed_cost_for_lot(
         lot_query="90141575",

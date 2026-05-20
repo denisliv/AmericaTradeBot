@@ -6,12 +6,7 @@ from aiogram.types import Update
 from psycopg import AsyncConnection
 
 from app.infrastructure.database.db import update_user_last_activity
-from app.infrastructure.services.promo_newsletter import (
-    add_user_to_consultation_queue,
-    add_user_to_inactivity_queue,
-    cancel_user_consultation_queue,
-    cancel_user_inactivity_queue,
-)
+from app.infrastructure.services.promo_newsletter import reset_user_promo_queues
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +49,9 @@ class ActivityTrackerMiddleware(BaseMiddleware):
                 await update_user_last_activity(conn, user_id=user_id)
                 logger.debug("Updated last_activity for user %d", user_id)
 
-                # Управляем очередями промо-рассылок
+                # Управляем очередями промо-рассылок одним pipeline-вызовом
                 if "redis" in data:
-                    redis_client = data["redis"]
-                    logger.debug(f"Processing promo queues for user {user_id}")
-
-                    # Отменяем и пересоздаем очереди неактивности (10 минут)
-                    await cancel_user_inactivity_queue(user_id, redis_client)
-                    await add_user_to_inactivity_queue(user_id, redis_client)
-
-                    # Отменяем и пересоздаем очереди консультации (24 часа)
-                    await cancel_user_consultation_queue(user_id, redis_client)
-                    await add_user_to_consultation_queue(user_id, redis_client)
-
-                    logger.debug(
-                        f"Successfully processed promo queues for user {user_id}"
-                    )
+                    await reset_user_promo_queues(user_id, data["redis"])
                 else:
                     logger.warning(f"Redis client not found in data for user {user_id}")
 

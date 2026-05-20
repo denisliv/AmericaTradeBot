@@ -1,4 +1,5 @@
 import logging
+import time as _time
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -14,6 +15,7 @@ from app.bot.keyboards.keyboards_reply import get_chat_keyboard
 from app.infrastructure.database.db import (
     add_chat_message,
     clear_chat_history,
+    record_delivery_metric,
     record_metric_event,
 )
 from app.infrastructure.services.ai_manager.schemas import AIReply, CarCard
@@ -167,6 +169,7 @@ async def handle_chat_message(
         await message.answer("Пожалуйста, напишите ваш вопрос.")
         return
 
+    started_at = _time.monotonic()
     try:
         async with ChatActionSender(
             bot=message.bot,
@@ -201,11 +204,21 @@ async def handle_chat_message(
         if reply.cars:
             await _send_car_cards(message, reply.cars)
 
+        elapsed_ms = int((_time.monotonic() - started_at) * 1000)
+        await record_delivery_metric(
+            conn,
+            category="llm_chat",
+            status="ok",
+            user_id=user_id,
+            duration_ms=elapsed_ms,
+        )
+
         logger.info(
-            "AI manager response sent to user %s (cars=%d, lead_sent=%s)",
+            "AI manager response sent to user %s (cars=%d, lead_sent=%s, took=%dms)",
             user_id,
             len(reply.cars),
             reply.lead_sent,
+            elapsed_ms,
         )
         if reply.lead_sent:
             await record_metric_event(
@@ -215,11 +228,20 @@ async def handle_chat_message(
             )
 
     except Exception as e:
+        elapsed_ms = int((_time.monotonic() - started_at) * 1000)
         logger.error(f"Error processing chat message for user {user_id}: {e}")
         await record_metric_event(
             conn,
             event_name="handler_exception",
             user_id=user_id,
+        )
+        await record_delivery_metric(
+            conn,
+            category="llm_chat",
+            status="error",
+            user_id=user_id,
+            error_text=str(e)[:500],
+            duration_ms=elapsed_ms,
         )
         await message.answer(
             "❌ Произошла ошибка при обработке вашего сообщения.\n"
