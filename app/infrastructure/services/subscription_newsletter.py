@@ -11,7 +11,6 @@ from psycopg_pool import AsyncConnectionPool
 from app.infrastructure.database.db import (
     get_active_subscribers,
     get_user_subscriptions,
-    record_delivery_metric,
 )
 from app.infrastructure.services.utils import get_data, make_media_group
 from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU, LEXICON_NEWSLETTER_RU, LEXICON_RU
@@ -178,20 +177,6 @@ async def process_newsletter_batch(
     batch: List[Tuple],
 ) -> None:
     """Параллельно обрабатывает батч подписчиков и планирует retry."""
-
-    async def _record(
-        status: str, subscriber_user_id: int, error_msg: str = ""
-    ) -> None:
-        if conn is None:
-            return
-        await record_delivery_metric(
-            conn,
-            category="subscription_newsletter",
-            status=status,
-            user_id=subscriber_user_id,
-            error_text=error_msg or None,
-        )
-
     results = await asyncio.gather(
         *(send_newsletter_to_user(bot, subscriber, conn) for subscriber, _ in batch),
         return_exceptions=True,
@@ -208,19 +193,11 @@ async def process_newsletter_batch(
         success, error_msg = result
         if success:
             logger.debug("Newsletter sent to user %s", subscriber.user_id)
-            await _record("sent", subscriber.user_id)
             continue
         if "blocked" in error_msg or "deactivated" in error_msg:
             logger.warning("User %s blocked bot or deactivated", subscriber.user_id)
-            await _record(
-                "blocked" if "blocked" in error_msg else "deactivated",
-                subscriber.user_id,
-                error_msg,
-            )
             continue
         await queue.add_retry(subscriber, retry_count)
-        await _record("failed", subscriber.user_id, error_msg)
-        await _record("retried", subscriber.user_id, error_msg)
         logger.warning(
             "Failed to send newsletter to user %s: %s",
             subscriber.user_id,

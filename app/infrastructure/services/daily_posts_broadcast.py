@@ -11,10 +11,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from psycopg_pool import AsyncConnectionPool
 
-from app.infrastructure.database.db import (
-    get_broadcast_recipients,
-    record_delivery_metric_with_pool,
-)
+from app.infrastructure.database.db import get_broadcast_recipients
 from app.infrastructure.paths import POSTS_DIR
 from app.infrastructure.services.subscription_newsletter import NewsletterQueue
 
@@ -120,31 +117,11 @@ async def send_weekly_posts_broadcast(bot: Bot, db_pool: AsyncConnectionPool) ->
             success, error_msg = result
             if success:
                 logger.debug("Post sent to user %s", subscriber.user_id)
-                await record_delivery_metric_with_pool(
-                    db_pool,
-                    category="daily_posts",
-                    status="sent",
-                    user_id=subscriber.user_id,
-                )
                 continue
             if "blocked" in error_msg or "deactivated" in error_msg:
                 logger.warning("User %s blocked bot or deactivated", subscriber.user_id)
-                await record_delivery_metric_with_pool(
-                    db_pool,
-                    category="daily_posts",
-                    status="blocked" if "blocked" in error_msg else "deactivated",
-                    user_id=subscriber.user_id,
-                    error_text=error_msg,
-                )
                 continue
             await queue.add_retry(subscriber, retry_count)
-            await record_delivery_metric_with_pool(
-                db_pool,
-                category="daily_posts",
-                status="failed",
-                user_id=subscriber.user_id,
-                error_text=error_msg,
-            )
             logger.warning(
                 "Failed posts broadcast to user %s: %s",
                 subscriber.user_id,

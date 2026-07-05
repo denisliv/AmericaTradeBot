@@ -22,7 +22,6 @@ from app.lexicon.lexicon_ru import (
     LEXICON_ADMIN_RU,
     LEXICON_RU,
 )
-from config.config import Config
 
 router = make_admin_router()
 
@@ -40,7 +39,6 @@ async def admin_users_button_press(
     message: Message,
     state: FSMContext,
     conn: AsyncConnection,
-    config: Config,
 ) -> None:
     s = await state.get_state()
     if in_mailing_fsm_state(s):
@@ -50,7 +48,7 @@ async def admin_users_button_press(
         await state.set_state(None)
     kpi = await get_admin_kpi_summary(conn)
     await message.answer(
-        format_admin_kpi_html(kpi, grafana_url=config.grafana.url),
+        format_admin_kpi_html(kpi),
         parse_mode="HTML",
         reply_markup=create_admin_panel_keyboard(),
         disable_web_page_preview=True,

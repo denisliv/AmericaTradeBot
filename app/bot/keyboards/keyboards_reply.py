@@ -16,13 +16,3 @@ def create_call_request_keyboard() -> ReplyKeyboardMarkup:
         )
     )
     return kb_builder.as_markup(resize_keyboard=True, one_time_keyboard=True)
-
-
-def get_chat_keyboard() -> ReplyKeyboardMarkup:
-    """Создает клавиатуру для чата с LLM"""
-    kb_builder: ReplyKeyboardBuilder = ReplyKeyboardBuilder()
-    kb_builder.row(
-        KeyboardButton(text="🗑️ Очистить историю"),
-        KeyboardButton(text="🚪 Выйти из чата"),
-    )
-    return kb_builder.as_markup(resize_keyboard=True, one_time_keyboard=False)

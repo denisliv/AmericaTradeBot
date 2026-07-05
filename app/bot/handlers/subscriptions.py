@@ -20,7 +20,6 @@ from app.infrastructure.database.db import (
     delete_subscription,
     get_self_selection_subscription_by_id,
     get_user_subscriptions,
-    record_metric_event,
 )
 from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU, LEXICON_RU
 

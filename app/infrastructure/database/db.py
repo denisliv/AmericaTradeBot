@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from psycopg import AsyncConnection, sql
-from psycopg_pool import AsyncConnectionPool
 
 from app.bot.enums.roles import UserRole
 from app.infrastructure.database.orm_models import (
@@ -17,124 +16,8 @@ logger = logging.getLogger(__name__)
 STATS_TZ = "Europe/Moscow"
 
 
-async def record_metric_event(
-    conn: AsyncConnection,
-    *,
-    event_name: str,
-    user_id: int | None = None,
-    value: float = 1.0,
-) -> None:
-    async with conn.cursor() as cursor:
-        await cursor.execute(
-            """
-            INSERT INTO bot_metrics_events(event_name, user_id, value)
-            VALUES (%(event_name)s, %(user_id)s, %(value)s);
-            """,
-            {
-                "event_name": event_name,
-                "user_id": user_id,
-                "value": value,
-            },
-        )
-
-
-async def record_metric_event_with_pool(
-    db_pool: AsyncConnectionPool,
-    *,
-    event_name: str,
-    user_id: int | None = None,
-    value: float = 1.0,
-) -> None:
-    try:
-        async with db_pool.connection() as conn:
-            await record_metric_event(
-                conn,
-                event_name=event_name,
-                user_id=user_id,
-                value=value,
-            )
-    except Exception as e:
-        logger.warning("Failed to record metric event `%s`: %s", event_name, e)
-
-
-async def record_delivery_metric(
-    conn: AsyncConnection,
-    *,
-    category: str,
-    status: str,
-    user_id: int | None = None,
-    error_text: str | None = None,
-    duration_ms: int | None = None,
-) -> None:
-    async with conn.cursor() as cursor:
-        await cursor.execute(
-            """
-            INSERT INTO bot_delivery_metrics(category, status, user_id, error_text, duration_ms)
-            VALUES (%(category)s, %(status)s, %(user_id)s, %(error_text)s, %(duration_ms)s);
-            """,
-            {
-                "category": category,
-                "status": status,
-                "user_id": user_id,
-                "error_text": error_text,
-                "duration_ms": duration_ms,
-            },
-        )
-
-
-async def record_delivery_metric_with_pool(
-    db_pool: AsyncConnectionPool,
-    *,
-    category: str,
-    status: str,
-    user_id: int | None = None,
-    error_text: str | None = None,
-    duration_ms: int | None = None,
-) -> None:
-    try:
-        async with db_pool.connection() as conn:
-            await record_delivery_metric(
-                conn,
-                category=category,
-                status=status,
-                user_id=user_id,
-                error_text=error_text,
-                duration_ms=duration_ms,
-            )
-    except Exception as e:
-        logger.warning(
-            "Failed to record delivery metric `%s/%s`: %s", category, status, e
-        )
-
-
-_METRICS_MATERIALIZED_VIEWS = (
-    "mv_events_hourly",
-    "mv_delivery_hourly",
-    "mv_users_daily",
-    "mv_self_funnel_daily",
-    "mv_llm_funnel_daily",
-)
-
-
-async def refresh_metrics_materialized_views(conn: AsyncConnection) -> None:
-    """Обновляет агрегированные представления для Grafana.
-
-    Использует CONCURRENTLY, чтобы не блокировать чтение во время refresh.
-    Это требует уникального индекса на каждом view — создаются в миграции 0003.
-    """
-    await conn.set_autocommit(True)
-    async with conn.cursor() as cursor:
-        for view in _METRICS_MATERIALIZED_VIEWS:
-            try:
-                await cursor.execute(
-                    f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view};"
-                )
-            except Exception as exc:
-                logger.warning("Failed to refresh %s: %s", view, exc)
-
-
 async def get_admin_kpi_summary(conn: AsyncConnection) -> dict[str, float | int]:
-    """4 ключевых KPI для админ-панели: ссылка на детали — в Grafana."""
+    """4 ключевых KPI для админ-панели."""
     async with conn.cursor() as cursor:
         await cursor.execute(
             """
@@ -768,87 +651,6 @@ async def update_user_last_activity(
             params=(user_id,),
         )
     logger.info("Updated last_activity for user %d", user_id)
-
-
-async def add_chat_message(
-    conn: AsyncConnection,
-    *,
-    user_id: int,
-    role: str,
-    content: str,
-) -> None:
-    """Добавляет сообщение в историю чата пользователя"""
-    async with conn.cursor() as cursor:
-        await cursor.execute(
-            query="""
-                INSERT INTO chat_history(user_id, role, content, created_at)
-                VALUES(%(user_id)s, %(role)s, %(content)s, %(created_at)s);
-            """,
-            params={
-                "user_id": user_id,
-                "role": role,
-                "content": content,
-                "created_at": datetime.now(timezone.utc),
-            },
-        )
-    logger.info(f"Chat message added for user {user_id}, role: {role}")
-
-
-async def get_chat_history(
-    conn: AsyncConnection,
-    *,
-    user_id: int,
-    limit: int = 10,
-) -> list:
-    """Получает историю чата пользователя"""
-    async with conn.cursor() as cursor:
-        data = await cursor.execute(
-            query="""
-                SELECT role, content, created_at 
-                FROM chat_history 
-                WHERE user_id = %s 
-                ORDER BY created_at DESC 
-                LIMIT %s;
-            """,
-            params=(user_id, limit),
-        )
-        rows = await data.fetchall()
-        # Возвращаем в правильном порядке (от старых к новым)
-        return [
-            {"role": row[0], "content": row[1], "created_at": row[2]}
-            for row in reversed(rows)
-        ]
-
-
-async def clear_chat_history(
-    conn: AsyncConnection,
-    *,
-    user_id: int,
-) -> None:
-    """Очищает историю чата пользователя"""
-    async with conn.cursor() as cursor:
-        await cursor.execute(
-            query="""
-                DELETE FROM chat_history WHERE user_id = %s;
-            """,
-            params=(user_id,),
-        )
-    logger.info(f"Chat history cleared for user {user_id}")
-
-
-async def prune_chat_history(conn: AsyncConnection) -> int:
-    """Удаляет все сообщения LLM-чата старше одного месяца (по created_at). Возвращает число удалённых строк."""
-    async with conn.transaction():
-        async with conn.cursor() as cursor:
-            await cursor.execute(
-                """
-                DELETE FROM chat_history
-                WHERE created_at < NOW() - INTERVAL '1 month';
-                """
-            )
-            deleted = cursor.rowcount
-    logger.info("Pruned %s chat_history rows older than 1 month", deleted)
-    return deleted if isinstance(deleted, int) and deleted >= 0 else 0
 
 
 async def admin_mailing_create_table(conn: AsyncConnection) -> None:

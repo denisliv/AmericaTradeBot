@@ -19,28 +19,6 @@ def _get_bitrix_base_url() -> str:
     return f"{base_url}/crm.lead.add.json"
 
 
-def _ai_manager_comments(data: dict[str, Any]) -> str:
-    parts = [
-        f"Источник: {data.get('source', 'AI Manager')}",
-        f"Стадия: {data.get('stage', 'interested')}",
-        f"Интент: {data.get('intent', '')}",
-    ]
-    optional_fields = (
-        ("Саммари для менеджера", "dialog_summary"),
-        ("Марка", "brand"),
-        ("Модель", "model"),
-        ("Год", "year"),
-        ("Бюджет", "budget"),
-        ("Выбранный лот", "selected_lot"),
-        ("Уверенность", "confidence"),
-    )
-    for label, key in optional_fields:
-        value = data.get(key)
-        if value not in (None, ""):
-            parts.append(f"{label}: {value}")
-    return " | ".join(parts)
-
-
 def _raise_for_bitrix_error(payload: Any) -> None:
     if isinstance(payload, dict) and payload.get("error"):
         raise RuntimeError(
@@ -94,17 +72,6 @@ def _build_fields(tg_login: str, tg_id: int, data: dict, method: str) -> dict:
                 f"Assisted selection (галерея): {car_title} | "
                 f"Кузов: {body_style} | Бюджет: {budget}"
             ),
-        }
-
-    if method == "ai_manager_chat":
-        return {
-            "FIELDS[TITLE]": "AIManager AmericaTrade(TgBot)",
-            "FIELDS[NAME]": data.get("name", ""),
-            "FIELDS[PHONE][0][VALUE]": data.get("phone", ""),
-            "FIELDS[PHONE][0][VALUE_TYPE]": "Мобильный",
-            "FIELDS[IM][0][VALUE]": telegram_value,
-            "FIELDS[IM][0][VALUE_TYPE]": "Telegram",
-            "FIELDS[COMMENTS]": _ai_manager_comments(data),
         }
 
     raise ValueError(f"Unsupported bitrix method: {method}")

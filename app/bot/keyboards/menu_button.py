@@ -19,10 +19,6 @@ def get_main_menu_commands(role: UserRole):
                 command="/subscription",
                 description=LEXICON_COMMANDS_RU.get("/subscription_description"),
             ),
-            BotCommand(
-                command="/chat",
-                description=LEXICON_COMMANDS_RU.get("/chat_description"),
-            ),
         ]
     elif role == UserRole.ADMIN:
         return [
@@ -37,10 +33,6 @@ def get_main_menu_commands(role: UserRole):
             BotCommand(
                 command="/subscription",
                 description=LEXICON_COMMANDS_RU.get("/subscription_description"),
-            ),
-            BotCommand(
-                command="/chat",
-                description=LEXICON_COMMANDS_RU.get("/chat_description"),
             ),
             BotCommand(
                 command="/admin",

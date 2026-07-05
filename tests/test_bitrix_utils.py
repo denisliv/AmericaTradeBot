@@ -19,34 +19,14 @@ def test_get_bitrix_base_url_uses_env(monkeypatch):
     )
 
 
-def test_ai_manager_bitrix_fields_include_lead_details():
-    fields = bitrix_utils._build_fields(
-        tg_login="user",
-        tg_id=123,
-        data={
-            "name": "Иван",
-            "phone": "+375291112233",
-            "intent": "search_cars",
-            "brand": "Toyota",
-            "model": "Camry",
-            "budget": "20000",
-            "selected_lot": "123456",
-            "confidence": 0.9,
-            "dialog_summary": (
-                "Клиент интересуется Toyota Camry в бюджете около 20 000$. "
-                "Просит менеджера проверить варианты и связаться в Telegram."
-            ),
-        },
-        method="ai_manager_chat",
-    )
-
-    comments = fields["FIELDS[COMMENTS]"]
-    assert "Toyota" in comments
-    assert "Camry" in comments
-    assert "20000" in comments
-    assert "123456" in comments
-    assert "Саммари для менеджера" in comments
-    assert "Просит менеджера проверить варианты" in comments
+def test_unsupported_bitrix_method_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported bitrix method"):
+        bitrix_utils._build_fields(
+            tg_login="user",
+            tg_id=123,
+            data={},
+            method="unknown_method",
+        )
 
 
 def test_raise_for_bitrix_error_rejects_json_error_payload():

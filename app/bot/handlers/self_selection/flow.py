@@ -15,7 +15,7 @@ from app.bot.keyboards.keyboards_inline import (
     create_choice_keyboard,
 )
 from app.bot.states.states import FSMFillSelfSelectionForm
-from app.infrastructure.database.db import add_self_selection_request, record_metric_event
+from app.infrastructure.database.db import add_self_selection_request
 from app.infrastructure.services.utils import (
     get_data,
     make_media_group,
@@ -33,7 +33,6 @@ router = Router()
 async def process_new_search_button_press(
     callback: CallbackQuery,
     state: FSMContext,
-    conn: AsyncConnection,
 ):
     await state.clear()
     await callback.message.edit_text(
@@ -43,12 +42,6 @@ async def process_new_search_button_press(
         ),
     )
     await callback.answer()
-    if conn is not None:
-        await record_metric_event(
-            conn,
-            event_name="self_flow_started",
-            user_id=callback.from_user.id,
-        )
     await state.set_state(FSMFillSelfSelectionForm.get_brand)
 
 
@@ -56,16 +49,9 @@ async def process_new_search_button_press(
 async def process_brand_button_press(
     callback: CallbackQuery,
     state: FSMContext,
-    conn: AsyncConnection,
 ):
     model_buttons = LEXICON_FORM_BUTTONS_RU["model_buttons"].get(callback.data)
     if model_buttons is None:
-        if conn is not None:
-            await record_metric_event(
-                conn,
-                event_name="invalid_callback",
-                user_id=callback.from_user.id,
-            )
         await callback.answer(
             "Марка не найдена, выберите вариант из списка", show_alert=True
         )
@@ -97,7 +83,6 @@ async def process_brand_button_press(
 async def process_model_button_press(
     callback: CallbackQuery,
     state: FSMContext,
-    conn: AsyncConnection,
 ):
     await callback.answer(
         text="""Наиболее выгодными предложениями для покупки авто из-за границы
@@ -111,12 +96,6 @@ async def process_model_button_press(
         ),
     )
     await state.update_data(model=callback.data)
-    if conn is not None and callback.data == "ALL MODELS":
-        await record_metric_event(
-            conn,
-            event_name="self_all_models_selected",
-            user_id=callback.from_user.id,
-        )
     await state.set_state(FSMFillSelfSelectionForm.get_year)
 
 
@@ -137,7 +116,6 @@ async def process_year_button_press(callback: CallbackQuery, state: FSMContext):
 async def process_drive_button_press(
     callback: CallbackQuery,
     state: FSMContext,
-    conn: AsyncConnection,
 ):
     await callback.message.edit_text(
         text="Какие варианты хотели бы увидеть?",
@@ -147,12 +125,6 @@ async def process_drive_button_press(
     )
     await callback.answer()
     await state.update_data(odometer=callback.data)
-    if conn is not None:
-        await record_metric_event(
-            conn,
-            event_name="self_reached_auction_step",
-            user_id=callback.from_user.id,
-        )
     await state.set_state(FSMFillSelfSelectionForm.get_auction_status)
 
 
@@ -186,13 +158,6 @@ async def process_auction_status_button_press(
     await state.clear()
 
     data = await get_data(user_dict=user_dict, count=10)
-    # value = количество найденных авто. 0 = не нашли, derived from value > 0.
-    await record_metric_event(
-        conn,
-        event_name="self_completed_search",
-        user_id=callback.from_user.id,
-        value=float(len(data)),
-    )
     if not data:
         await callback.message.answer(
             text=LEXICON_RU["nothing_found_text"],

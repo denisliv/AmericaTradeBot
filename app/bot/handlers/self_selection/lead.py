@@ -4,12 +4,10 @@ from aiogram import Bot, F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from psycopg.connection_async import AsyncConnection
 
 from app.bot.keyboards.keyboards_inline import create_choice_keyboard
 from app.bot.keyboards.keyboards_reply import create_call_request_keyboard
 from app.bot.states.states import FSMFillPhoneForm
-from app.infrastructure.database.db import record_metric_event
 from app.infrastructure.services.bitrix_utils import bitrix_send_data
 from app.lexicon.lexicon_ru import LEXICON_RU
 
@@ -20,22 +18,9 @@ router = Router()
 async def process_auto_press(
     callback: CallbackQuery,
     state: FSMContext,
-    conn: AsyncConnection,
 ):
-    if conn is not None:
-        await record_metric_event(
-            conn,
-            event_name="self_clicked_lot",
-            user_id=callback.from_user.id,
-        )
     data = {"name": callback.from_user.first_name, "lot": callback.data}
     if callback.from_user.username:
-        if conn is not None:
-            await record_metric_event(
-                conn,
-                event_name="self_lead_sent",
-                user_id=callback.from_user.id,
-            )
         await bitrix_send_data(
             tg_login=callback.from_user.username,
             tg_id=callback.from_user.id,
@@ -66,7 +51,6 @@ async def process_phone_sent(
     message: Message,
     bot: Bot,
     state: FSMContext,
-    conn: AsyncConnection,
 ):
     data = await state.get_data()
     old_message_id = data.get("old_message_id")
@@ -91,12 +75,6 @@ async def process_phone_sent(
     else:
         data["phone"] = message.contact.phone_number
         await state.clear()
-        if conn is not None:
-            await record_metric_event(
-                conn,
-                event_name="self_lead_sent",
-                user_id=message.from_user.id,
-            )
         await bitrix_send_data(
             tg_login=message.from_user.username,
             tg_id=message.from_user.id,

@@ -13,7 +13,7 @@ from app.bot.keyboards.keyboards_inline import (
     create_auto_keyboard,
     create_choice_keyboard,
 )
-from app.infrastructure.database.db import record_metric_event, set_subscription
+from app.infrastructure.database.db import set_subscription
 from app.infrastructure.services.utils import (
     make_media_group,
     safe_send_media_group,
@@ -39,11 +39,6 @@ async def process_subscription_button_press(
     )
 
     if count != 0:
-        await record_metric_event(
-            conn,
-            event_name="self_subscription_created",
-            user_id=callback.from_user.id,
-        )
         await callback.message.edit_text(
             text=LEXICON_RU["yes_subscription_text"](count),
             reply_markup=create_choice_keyboard(

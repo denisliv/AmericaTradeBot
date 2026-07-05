@@ -123,10 +123,8 @@ async def handle_panel_during_moderation_input(
     if text == b["statistics_button"]:
         await state.set_state(None)
         kpi = await get_admin_kpi_summary(conn)
-        # В контексте ban/unban-ввода у нас нет config для grafana_url —
-        # это ок, краткая сводка достаточна.
         await message.answer(
-            format_admin_kpi_html(kpi, grafana_url=None),
+            format_admin_kpi_html(kpi),
             parse_mode="HTML",
             reply_markup=create_admin_panel_keyboard(),
         )

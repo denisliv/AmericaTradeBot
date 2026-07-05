@@ -10,7 +10,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.infrastructure.database.db import (
     get_admin_mailing_waiting_user_ids,
-    record_metric_event,
     update_admin_mailing_status,
 )
 
@@ -99,12 +98,6 @@ class AdminMailingSender:
                 )
             except TelegramRetryAfter as e:
                 last_error = e
-                await record_metric_event(
-                    conn,
-                    event_name="telegram_retry_after",
-                    user_id=user_id,
-                    value=float(e.retry_after),
-                )
                 if (
                     attempt >= _MAX_RETRY_ATTEMPTS
                     or total_wait + e.retry_after > _RETRY_TOTAL_CAP_SECONDS
@@ -160,12 +153,6 @@ class AdminMailingSender:
                     )
             except TelegramRetryAfter as e:
                 last_error = e
-                await record_metric_event(
-                    conn,
-                    event_name="telegram_retry_after",
-                    user_id=user_id,
-                    value=float(e.retry_after),
-                )
                 if (
                     attempt >= _MAX_RETRY_ATTEMPTS
                     or total_wait + e.retry_after > _RETRY_TOTAL_CAP_SECONDS

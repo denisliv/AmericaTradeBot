@@ -4,7 +4,6 @@ LEXICON_COMMANDS_RU: dict[str, str] = {
     "/start_description": "Запуск бота",
     "/help_description": "Справка по работе бота",
     "/subscription_description": "Проверить подписки",
-    "/chat_description": "Чат с AI-менеджером",
     "/statistics_description": "Статистика",
     "/admin_description": "Панель администратора",
     "/ban_description": "Забанить пользователя (требует user_id или username)",
@@ -56,8 +55,7 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "Подпишитесь на интересующие вас модели и будьте в курсе самых свежих обновлений!\r\n\n"
     "➡ Комманда /start - запуск бота.\r\n"
     "➡ Комманда /help - помощь по работе с ботом.\r\n"
-    "➡ Комманда /subscription - редактирование ваших подписок.\r\n"
-    "➡ Комманда /chat - чат с AI-менеджером.\r\n",
+    "➡ Комманда /subscription - редактирование ваших подписок.\r\n",
     "contacts_text": "<b>Наши контакты:</b>\r\n\n"
     "📞 <b>+375 44 723-24-25</b>\r\n"
     "<a href='https://www.instagram.com/americatrade.by'>📱 Instagram</a>\r\n"
@@ -132,7 +130,7 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "subscription_deleted_text": "Подписка успешно удалена",
     "subscription_not_found_text": "Подписка не найдена",
     "call_request_answer_text": "Спасибо! Ниже ссылки на сайт и отзывы — также можете написать нам в мессенджерах.",
-    "unknown_message_hint_text": "Используйте меню или Чат с AI-менеджером.",
+    "unknown_message_hint_text": "Используйте меню.",
 }
 
 LEXICON_BUTTONS_RU: dict[str, str] = {

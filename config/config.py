@@ -44,53 +44,12 @@ class CopartSettings:
 
 
 @dataclass
-class OpenAISettings:
-    api_key: str
-    base_url: str
-    model_name: str
-
-
-@dataclass
-class EmbeddingsSettings:
-    api_key: str
-    base_url: str
-    model_name: str
-
-
-@dataclass
-class BitrixSettings:
-    webhook_url: str
-    source: str
-
-
-@dataclass
-class GrafanaSettings:
-    url: str
-
-
-@dataclass
-class AIManagerSettings:
-    max_history_messages: int
-    rag_top_k: int
-    rag_score_threshold: float
-    faiss_index_path: str
-    knowledge_file_path: str
-    lead_confidence_threshold: float
-    search_result_count: int
-
-
-@dataclass
 class Config:
     bot: BotSettings
     db: DatabaseSettings
     redis: RedisSettings
     log: LogSettings
     copart: CopartSettings
-    openai: OpenAISettings
-    embeddings: EmbeddingsSettings
-    bitrix: BitrixSettings
-    grafana: GrafanaSettings
-    ai_manager: AIManagerSettings
 
 
 def load_config(path: str | None = None) -> Config:
@@ -138,51 +97,6 @@ def load_config(path: str | None = None) -> Config:
 
     copart = CopartSettings(url=env("COPART_URL"))
 
-    openai = OpenAISettings(
-        api_key=env("API_KEY"),
-        base_url=env("BASE_URL", default="https://api.openai.com/v1"),
-        model_name=env("MODEL_NAME", default="gpt-5-mini"),
-    )
-
-    embeddings = EmbeddingsSettings(
-        api_key=env("EMBEDDINGS_API_KEY", default=openai.api_key),
-        base_url=env("EMBEDDINGS_BASE_URL", default=openai.base_url),
-        model_name=env("EMBEDDINGS_MODEL_NAME", default="text-embedding-3-small"),
-    )
-
-    bitrix = BitrixSettings(
-        webhook_url=env(
-            "BITRIX_WEBHOOK_URL",
-            default="",
-        ),
-        source=env("BITRIX_SOURCE", default="AI Manager (Telegram)"),
-    )
-
-    grafana = GrafanaSettings(
-        # Публичный URL Grafana, который админ открывает по ссылке в /admin.
-        # Пусто = ссылка не показывается.
-        url=env("GRAFANA_PUBLIC_URL", default=""),
-    )
-
-    ai_manager = AIManagerSettings(
-        max_history_messages=env.int("AI_MANAGER_MAX_HISTORY_MESSAGES", default=20),
-        rag_top_k=env.int("AI_MANAGER_RAG_TOP_K", default=4),
-        # Cosine relevance score on [0,1]; OpenAI embeddings usually cluster around 0.3–0.8.
-        rag_score_threshold=env.float("AI_MANAGER_RAG_SCORE_THRESHOLD", default=0.3),
-        faiss_index_path=env(
-            "AI_MANAGER_FAISS_INDEX_PATH",
-            default="data/vectorstore/ai_manager",
-        ),
-        knowledge_file_path=env(
-            "AI_MANAGER_KNOWLEDGE_FILE",
-            default="data/ai_manager/agent.md",
-        ),
-        lead_confidence_threshold=env.float(
-            "AI_MANAGER_LEAD_CONFIDENCE_THRESHOLD", default=0.75
-        ),
-        search_result_count=env.int("AI_MANAGER_SEARCH_RESULT_COUNT", default=3),
-    )
-
     log_settings = LogSettings(
         level=env("LOG_LEVEL", default="INFO"),
         format=env(
@@ -199,9 +113,4 @@ def load_config(path: str | None = None) -> Config:
         redis=redis,
         log=log_settings,
         copart=copart,
-        openai=openai,
-        embeddings=embeddings,
-        bitrix=bitrix,
-        grafana=grafana,
-        ai_manager=ai_manager,
     )

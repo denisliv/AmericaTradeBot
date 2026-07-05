@@ -41,6 +41,7 @@ graphify-out/
 *.swp
 *.swo
 *~
+.codegraph
 
 # OS generated files
 .DS_Store
@@ -56,15 +57,10 @@ Thumbs.db
 .postgres_data/
 .pgadmin_data/
 
-# Local vector indexes
-data/vectorstore/
-
 # Content supplied per environment (dirs kept via .gitkeep)
 data/salesdata.csv
 data/posts/*
 !data/posts/.gitkeep
-data/ai_manager/*
-!data/ai_manager/.gitkeep
 
 # Logs
 *.log
