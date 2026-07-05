@@ -7,10 +7,10 @@ URL подключения собирается из переменных окр
 from logging.config import fileConfig
 from urllib.parse import quote
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from config.config import load_config
+from alembic import context
+from app.config import load_config
 
 config = context.config
 

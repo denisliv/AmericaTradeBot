@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery, Message
 from psycopg import AsyncConnection
 
 from app.bot.enums.roles import UserRole
-from app.infrastructure.database.db import get_user_role
+from app.infrastructure.database.users import get_user_role
 
 
 class UserRoleFilter(BaseFilter):

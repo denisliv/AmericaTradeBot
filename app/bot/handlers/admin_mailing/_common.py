@@ -26,7 +26,7 @@ from app.bot.keyboards.keyboards_inline import (
 from app.bot.states.admin_mailing import FSMAdminMailing
 from app.bot.states.admin_panel import FSMAdminPanel
 from app.bot.utils.admin_dashboard_text import format_admin_kpi_html
-from app.infrastructure.database.db import get_admin_kpi_summary
+from app.infrastructure.database.users import get_admin_kpi_summary
 from app.lexicon.lexicon_ru import (
     LEXICON_ADMIN_BUTTONS_RU,
     LEXICON_ADMIN_RU,

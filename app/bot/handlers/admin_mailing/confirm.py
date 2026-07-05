@@ -13,7 +13,7 @@ from app.bot.handlers.admin_mailing._common import (
     make_admin_router,
 )
 from app.bot.states.admin_mailing import FSMAdminMailing
-from app.infrastructure.database.db import (
+from app.infrastructure.database.admin_mailing import (
     admin_mailing_delete_table,
     admin_mailing_prepare_for_broadcast,
 )

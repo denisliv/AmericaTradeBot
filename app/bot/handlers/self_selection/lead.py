@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from app.bot.keyboards.keyboards_inline import create_choice_keyboard
 from app.bot.keyboards.keyboards_reply import create_call_request_keyboard
 from app.bot.states.states import FSMFillPhoneForm
+from app.config import Config
 from app.infrastructure.services.bitrix_utils import bitrix_send_data
 from app.lexicon.lexicon_ru import LEXICON_RU
 
@@ -18,6 +19,7 @@ router = Router()
 async def process_auto_press(
     callback: CallbackQuery,
     state: FSMContext,
+    config: Config,
 ):
     data = {"name": callback.from_user.first_name, "lot": callback.data}
     if callback.from_user.username:
@@ -26,6 +28,7 @@ async def process_auto_press(
             tg_id=callback.from_user.id,
             data=data,
             method="self_selection",
+            webhook_url=config.bitrix.webhook_url,
         )
         await callback.message.edit_text(
             text=LEXICON_RU["phone_request_answer_text"],
@@ -51,6 +54,7 @@ async def process_phone_sent(
     message: Message,
     bot: Bot,
     state: FSMContext,
+    config: Config,
 ):
     data = await state.get_data()
     old_message_id = data.get("old_message_id")
@@ -71,6 +75,7 @@ async def process_phone_sent(
             tg_id=message.from_user.id,
             data=lead,
             method="assisted_gallery",
+            webhook_url=config.bitrix.webhook_url,
         )
     else:
         data["phone"] = message.contact.phone_number
@@ -80,6 +85,7 @@ async def process_phone_sent(
             tg_id=message.from_user.id,
             data=data,
             method="self_selection",
+            webhook_url=config.bitrix.webhook_url,
         )
 
     await message.answer(

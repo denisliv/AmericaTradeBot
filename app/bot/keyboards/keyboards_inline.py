@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.bot.callback_data import SubscribeCB, ViewSubscriptionCB
-from app.infrastructure.database.orm_models import SelfSelectionRow
+from app.infrastructure.database.models import SelfSelectionRow
 from app.lexicon.lexicon_ru import (
     LEXICON_ADMIN_BUTTONS_RU,
     LEXICON_BUTTONS_RU,
@@ -152,7 +152,7 @@ def format_date(created_at) -> str:
                 return parsed_date.strftime("%Y-%m-%d")
             else:
                 return str(created_at)
-        except:
+        except ValueError:
             return str(created_at)
 
 

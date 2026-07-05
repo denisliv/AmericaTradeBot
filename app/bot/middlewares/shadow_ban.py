@@ -5,7 +5,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Update, User
 from psycopg import AsyncConnection
 
-from app.infrastructure.database.db import get_user_banned_status_by_id
+from app.infrastructure.database.users import get_user_banned_status_by_id
 
 logger = logging.getLogger(__name__)
 

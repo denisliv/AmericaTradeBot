@@ -8,11 +8,10 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from psycopg_pool import AsyncConnectionPool
 
-from app.infrastructure.database.db import (
-    get_active_subscribers,
-    get_user_subscriptions,
-)
-from app.infrastructure.services.utils import get_data, make_media_group
+from app.infrastructure.database.selections import get_user_subscriptions
+from app.infrastructure.database.users import get_active_subscribers
+from app.infrastructure.services.car_media import make_media_group
+from app.infrastructure.services.salesdata import get_data
 from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU, LEXICON_NEWSLETTER_RU, LEXICON_RU
 
 logger = logging.getLogger(__name__)

@@ -4,7 +4,7 @@ import os
 import sys
 
 from app.bot.bot import main
-from config.config import Config, load_config
+from app.config import Config, load_config
 
 logging.basicConfig(
     level=logging.INFO,

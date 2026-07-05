@@ -1,6 +1,6 @@
 import pytest
 
-from app.infrastructure.services.utils import (
+from app.infrastructure.services.salesdata import (
     REQUIRED_SALESDATA_COLUMNS,
     _validate_sales_csv_bytes,
     _write_sales_csv_atomically,

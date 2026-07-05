@@ -13,11 +13,9 @@ from app.bot.keyboards.keyboards_inline import (
     create_auto_keyboard,
     create_choice_keyboard,
 )
-from app.infrastructure.database.db import set_subscription
-from app.infrastructure.services.utils import (
-    make_media_group,
-    safe_send_media_group,
-)
+from app.bot.utils.media import safe_send_media_group
+from app.infrastructure.database.selections import set_subscription
+from app.infrastructure.services.car_media import make_media_group
 from app.lexicon.lexicon_ru import LEXICON_RU
 
 router = Router()

@@ -5,7 +5,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Update
 from psycopg import AsyncConnection
 
-from app.infrastructure.database.db import update_user_last_activity
+from app.infrastructure.database.users import update_user_last_activity
 from app.infrastructure.services.promo_newsletter import reset_user_promo_queues
 
 logger = logging.getLogger(__name__)

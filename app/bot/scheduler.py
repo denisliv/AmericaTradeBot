@@ -8,10 +8,13 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from psycopg_pool import AsyncConnectionPool
 
+from app.config import Config
+from app.infrastructure.services.daily_posts_broadcast import (
+    send_weekly_posts_broadcast,
+)
 from app.infrastructure.services.promo_newsletter import start_promo_listener
-from app.infrastructure.services.daily_posts_broadcast import send_weekly_posts_broadcast
+from app.infrastructure.services.salesdata import download_csv
 from app.infrastructure.services.subscription_newsletter import send_daily_newsletter
-from app.infrastructure.services.utils import download_csv
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +22,13 @@ logger = logging.getLogger(__name__)
 class SchedulerManager:
     """Менеджер для управления задачами AsyncIOScheduler"""
 
-    def __init__(self, timezone: str = "Europe/Moscow"):
+    def __init__(
+        self,
+        bot: Bot,
+        db_pool: AsyncConnectionPool,
+        redis_client: redis.Redis,
+        timezone: str = "Europe/Moscow",
+    ):
         self.scheduler = AsyncIOScheduler(
             timezone=timezone,
             job_defaults={
@@ -29,9 +38,9 @@ class SchedulerManager:
             },
         )
         self._is_started = False
-        self._bot: Optional[Bot] = None
-        self._db_pool: Optional[AsyncConnectionPool] = None
-        self._redis_client: Optional[redis.Redis] = None
+        self._bot = bot
+        self._db_pool = db_pool
+        self._redis_client = redis_client
         self._promo_listener_task: Optional[asyncio.Task] = None
         self._promo_stop_event = asyncio.Event()
 
@@ -41,9 +50,6 @@ class SchedulerManager:
         coro,
         lock_ttl_seconds: int = 1800,
     ) -> None:
-        if self._redis_client is None:
-            await coro
-            return
         lock_value = str(uuid.uuid4())
         acquired = await self._redis_client.set(
             lock_key,
@@ -118,12 +124,6 @@ class SchedulerManager:
 
     def start_promo_listener(self) -> None:
         """Запускает слушатель Redis для промо-рассылок"""
-        if self._bot is None or self._db_pool is None or self._redis_client is None:
-            logger.error(
-                "Bot, database pool or Redis client not set for promo listener"
-            )
-            return
-
         if self._promo_listener_task and not self._promo_listener_task.done():
             logger.info("Promo listener already running")
             return
@@ -154,10 +154,6 @@ class SchedulerManager:
 
     async def _newsletter_wrapper(self) -> None:
         """Обертка для функции рассылки с передачей бота и пула соединений"""
-        if self._bot is None or self._db_pool is None:
-            logger.error("Bot or database pool not set for newsletter task")
-            return
-
         await self._run_with_lock(
             "lock:daily_newsletter",
             send_daily_newsletter(self._bot, self._db_pool),
@@ -172,9 +168,6 @@ class SchedulerManager:
         )
 
     async def _weekly_posts_broadcast_wrapper(self) -> None:
-        if self._bot is None or self._db_pool is None:
-            logger.error("Bot or database pool not set for weekly posts broadcast")
-            return
         await self._run_with_lock(
             "lock:weekly_posts_broadcast",
             send_weekly_posts_broadcast(self._bot, self._db_pool),
@@ -213,29 +206,37 @@ class SchedulerManager:
 
 
 def create_scheduler(
-    config,
+    config: Config,
     bot: Bot,
     db_pool: AsyncConnectionPool,
     redis_client: redis.Redis,
 ) -> SchedulerManager:
-    """Создает и настраивает планировщик с задачами"""
-    scheduler_manager = SchedulerManager()
-
-    # Устанавливаем бота, пул соединений и Redis клиент
-    scheduler_manager._bot = bot
-    scheduler_manager._db_pool = db_pool
-    scheduler_manager._redis_client = redis_client
-    logger.info("Bot, database pool and Redis client set for scheduler tasks")
+    """Создает и настраивает планировщик с задачами по расписанию из конфига"""
+    schedule = config.scheduler
+    scheduler_manager = SchedulerManager(
+        bot=bot,
+        db_pool=db_pool,
+        redis_client=redis_client,
+        timezone=schedule.timezone,
+    )
 
     # Добавляем задачу загрузки CSV
-    scheduler_manager.add_download_csv_job(url=config.copart.url, interval_minutes=60)
+    scheduler_manager.add_download_csv_job(
+        url=config.copart.url,
+        interval_minutes=schedule.csv_interval_minutes,
+    )
 
     # Добавляем задачу ежедневной рассылки
-    scheduler_manager.add_daily_newsletter_job(hour=9, minute=20)
+    scheduler_manager.add_daily_newsletter_job(
+        hour=schedule.newsletter_hour,
+        minute=schedule.newsletter_minute,
+    )
 
-    # Еженедельная контент-рассылка (посты из data/posts) — среда 19:00 по Москве
+    # Еженедельная контент-рассылка (посты из data/posts)
     scheduler_manager.add_weekly_posts_broadcast_job(
-        hour=19, minute=0, day_of_week="wed"
+        hour=schedule.posts_hour,
+        minute=schedule.posts_minute,
+        day_of_week=schedule.posts_day_of_week,
     )
 
     # Промо-рассылка теперь обрабатывается через Redis Keyspace Notifications

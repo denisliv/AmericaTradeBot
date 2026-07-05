@@ -3,18 +3,14 @@ import pytest
 from app.infrastructure.services import bitrix_utils
 
 
-def test_get_bitrix_base_url_requires_env(monkeypatch):
-    monkeypatch.delenv("BITRIX_WEBHOOK_URL", raising=False)
-
+def test_get_bitrix_base_url_rejects_empty_webhook():
     with pytest.raises(RuntimeError, match="BITRIX_WEBHOOK_URL"):
-        bitrix_utils._get_bitrix_base_url()
+        bitrix_utils._get_bitrix_base_url("")
 
 
-def test_get_bitrix_base_url_uses_env(monkeypatch):
-    monkeypatch.setenv("BITRIX_WEBHOOK_URL", "https://example.bitrix24.by/rest/1/token/")
-
+def test_get_bitrix_base_url_builds_lead_endpoint():
     assert (
-        bitrix_utils._get_bitrix_base_url()
+        bitrix_utils._get_bitrix_base_url("https://example.bitrix24.by/rest/1/token/")
         == "https://example.bitrix24.by/rest/1/token/crm.lead.add.json"
     )
 

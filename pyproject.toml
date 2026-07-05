@@ -23,4 +23,12 @@ dependencies = [
 dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
+    "ruff>=0.8",
 ]
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+# Дефолтные правила (E4/E7/E9, F) + сортировка импортов.
+extend-select = ["I"]

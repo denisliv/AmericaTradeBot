@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery
 from app.bot.keyboards.keyboards_inline import create_choice_keyboard
 from app.bot.keyboards.keyboards_reply import create_call_request_keyboard
 from app.bot.states.states import FSMFillConsultationRequestForm
+from app.config import Config
 from app.infrastructure.services.bitrix_utils import bitrix_send_data
 from app.lexicon.lexicon_ru import LEXICON_RU
 
@@ -56,7 +57,7 @@ async def process_name_input(
 @consultation_request_router.message(
     StateFilter(FSMFillConsultationRequestForm.get_phone)
 )
-async def process_phone_input(message, state: FSMContext, bot: Bot):
+async def process_phone_input(message, state: FSMContext, bot: Bot, config: Config):
     try:
         await state.update_data(phone=message.contact.phone_number)
         data = await state.get_data()
@@ -69,6 +70,7 @@ async def process_phone_input(message, state: FSMContext, bot: Bot):
             tg_id=message.from_user.id,
             data=data,
             method="consultation_request",
+            webhook_url=config.bitrix.webhook_url,
         )
 
         await message.answer(

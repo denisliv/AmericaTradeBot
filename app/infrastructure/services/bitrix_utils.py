@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from typing import Any
 
 import aiohttp
@@ -11,8 +10,8 @@ _BITRIX_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5)
 _BITRIX_MAX_ATTEMPTS = 3
 
 
-def _get_bitrix_base_url() -> str:
-    raw_url = os.getenv("BITRIX_WEBHOOK_URL", "").strip()
+def _get_bitrix_base_url(webhook_url: str) -> str:
+    raw_url = webhook_url.strip()
     if not raw_url:
         raise RuntimeError("BITRIX_WEBHOOK_URL is required")
     base_url = raw_url.rstrip("/")
@@ -77,8 +76,15 @@ def _build_fields(tg_login: str, tg_id: int, data: dict, method: str) -> dict:
     raise ValueError(f"Unsupported bitrix method: {method}")
 
 
-async def bitrix_send_data(tg_login: str, tg_id: int, data: dict, method: str) -> str:
-    url = _get_bitrix_base_url()
+async def bitrix_send_data(
+    tg_login: str,
+    tg_id: int,
+    data: dict,
+    method: str,
+    *,
+    webhook_url: str,
+) -> str:
+    url = _get_bitrix_base_url(webhook_url)
     fields = _build_fields(tg_login, tg_id, data, method)
 
     last_error: Exception | None = None

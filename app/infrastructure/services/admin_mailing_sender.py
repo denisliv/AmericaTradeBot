@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
-from app.infrastructure.database.db import (
+from app.infrastructure.database.admin_mailing import (
     get_admin_mailing_waiting_user_ids,
     update_admin_mailing_status,
 )

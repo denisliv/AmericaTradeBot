@@ -1,4 +1,4 @@
-from app.infrastructure.services.utils import filter_by_make_and_model, match_car
+from app.infrastructure.services.salesdata import filter_by_make_and_model, match_car
 
 
 def test_filter_by_make_and_model_all_models_matches_any_model_of_brand():

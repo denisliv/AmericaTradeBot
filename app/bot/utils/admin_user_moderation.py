@@ -1,6 +1,6 @@
 from psycopg import AsyncConnection
 
-from app.infrastructure.database.db import (
+from app.infrastructure.database.users import (
     change_user_banned_status_by_id,
     change_user_banned_status_by_username,
     get_user_banned_status_by_id,

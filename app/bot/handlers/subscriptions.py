@@ -16,7 +16,7 @@ from app.bot.keyboards.keyboards_inline import (
     create_subscriptions_keyboard,
     format_date,
 )
-from app.infrastructure.database.db import (
+from app.infrastructure.database.selections import (
     delete_subscription,
     get_self_selection_subscription_by_id,
     get_user_subscriptions,

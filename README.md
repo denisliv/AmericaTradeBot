@@ -18,18 +18,18 @@ AmericaTrade/
 ├── app/
 │   ├── bot/                      # Telegram: handlers, middlewares, keyboards, states
 │   ├── infrastructure/
-│   │   ├── database/             # Подключение, схема, db helpers
-│   │   └── services/           # Рассылки, Bitrix, утилиты
-│   └── lexicon/                # Тексты бота
-├── config/                       # Загрузка настроек из переменных окружения
-├── data/                         # Контент (posts, CSV)
+│   │   ├── database/             # Подключение, запросы (users, selections, admin_mailing)
+│   │   └── services/           # Рассылки, Bitrix, данные аукционов (salesdata)
+│   ├── lexicon/                # Тексты бота
+│   └── config.py                 # Загрузка настроек из переменных окружения
+├── data/                         # Контент и runtime-данные (posts, галерея, CSV)
 ├── alembic/                      # Миграции схемы БД (Alembic)
 │   ├── env.py
 │   └── versions/
 ├── alembic.ini
 ├── tests/                        # Pytest
 ├── main.py                       # Точка входа
-├── pyproject.toml / uv.lock      # Зависимости (uv)
+├── pyproject.toml / uv.lock      # Зависимости (uv), конфиг ruff
 ├── Dockerfile                    # Образ приложения (Python 3.13, uv)
 └── docker-compose.yml            # PostgreSQL 16, Redis 7, бот
 ```
@@ -100,6 +100,7 @@ cp env.example .env
 - `REDIS_*` (хост, порт; для промо используется отдельный номер БД: `REDIS_PROMO_DATABASE`)
 - `COPART_URL` — источник CSV с данными аукционов
 - опционально: `BITRIX_WEBHOOK_URL`, `LOG_LEVEL`, `LOG_FORMAT`
+- опционально: `SCHEDULER_*` — часовой пояс и расписание фоновых задач (значения по умолчанию — в `env.example`)
 
 ### 5. База данных
 

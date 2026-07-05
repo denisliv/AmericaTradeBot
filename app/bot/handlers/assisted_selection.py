@@ -13,7 +13,8 @@ from app.bot.keyboards.keyboards_inline import (
 )
 from app.bot.keyboards.keyboards_reply import create_call_request_keyboard
 from app.bot.states.states import FSMFillAssistedSelectionForm, FSMFillPhoneForm
-from app.infrastructure.database.db import add_assisted_selection_request
+from app.config import Config
+from app.infrastructure.database.selections import add_assisted_selection_request
 from app.infrastructure.services.assisted_gallery import (
     build_assisted_gallery_media_group,
     make_ag_lead_callback,
@@ -214,7 +215,11 @@ async def process_else_car_button_press(
 
 
 @assisted_selection_router.callback_query(F.data.startswith("ag_lead|"))
-async def process_assisted_gallery_lead(callback: CallbackQuery, state: FSMContext):
+async def process_assisted_gallery_lead(
+    callback: CallbackQuery,
+    state: FSMContext,
+    config: Config,
+):
     parsed = parse_ag_lead_callback(callback.data)
     if not parsed:
         await callback.answer()
@@ -234,6 +239,7 @@ async def process_assisted_gallery_lead(callback: CallbackQuery, state: FSMConte
                 "budget": budget_ru,
             },
             method="assisted_gallery",
+            webhook_url=config.bitrix.webhook_url,
         )
         await callback.message.edit_text(
             text=LEXICON_RU["phone_request_answer_text"],

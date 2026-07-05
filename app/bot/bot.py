@@ -25,8 +25,8 @@ from app.bot.middlewares.redis import RedisMiddleware
 from app.bot.middlewares.shadow_ban import ShadowBanMiddleware
 from app.bot.middlewares.throttling import ThrottlingMiddleware
 from app.bot.scheduler import create_scheduler
+from app.config import Config
 from app.infrastructure.database.connection import get_pg_pool
-from config.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +112,9 @@ async def main(config: Config) -> None:
     dp.message.middleware(
         ThrottlingMiddleware(storage=storage, admin_ids=config.bot.admin_ids)
     )
+
+    # Регистрируем config как зависимость для handlers (aiogram DI)
+    dp["config"] = config
 
     stop_event = asyncio.Event()
     _install_signal_handlers(stop_event)

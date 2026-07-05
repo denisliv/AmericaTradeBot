@@ -1,6 +1,6 @@
 import pytest
 
-from app.infrastructure.database.db import delete_subscription, set_subscription
+from app.infrastructure.database.selections import delete_subscription, set_subscription
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,5 @@
+"""Copart sales data: CSV download, validation and car search."""
+
 import asyncio
 import csv
 import logging
@@ -9,22 +11,12 @@ from typing import List, Optional, Tuple
 import aiofiles
 import aiohttp
 import async_timeout
-from aiogram.enums import ButtonStyle
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    InputMediaPhoto,
-)
 from aiohttp.client_exceptions import ContentTypeError
 
 from app.infrastructure.paths import SALESDATA_CSV
 from app.infrastructure.services.salesdata_cache import sales_data_cache
-from app.lexicon.lexicon_ru import LEXICON_CAPTION_RU, LEXICON_EN_RU, LEXICON_RU_CSV
+from app.lexicon.lexicon_ru import LEXICON_RU_CSV
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 REQUIRED_SALESDATA_COLUMNS = (
@@ -124,88 +116,6 @@ def match_car(
             return False
     if auction_status and parse_buy_now_price(row) <= 0:
         return False
-    return True
-
-
-# Функция подготовки альбома для отправки пользователю
-async def make_media_group(car, first_name, number):
-    year = car[0]["Year"]
-    brand = car[0]["Make"]
-    model = car[0]["Model Detail"]
-    color = (
-        LEXICON_EN_RU["Color"][car[0]["Color"]]
-        if car[0]["Color"] in LEXICON_EN_RU["Color"]
-        else car[0]["Color"]
-    )
-    odometer = car[0]["Odometer"]
-    engine = car[0]["Engine"]
-    drive = (
-        LEXICON_EN_RU["Drive"][car[0]["Drive"]]
-        if car[0]["Drive"] in LEXICON_EN_RU["Drive"]
-        else car[0]["Drive"]
-    )
-    transmission = (
-        LEXICON_EN_RU["Transmission"][car[0]["Transmission"]]
-        if car[0]["Transmission"] in LEXICON_EN_RU["Transmission"]
-        else car[0]["Transmission"]
-    )
-    sale_date = car[0]["Sale Date M/D/CY"]
-
-    price_value = parse_buy_now_price(car[0])
-    buy_now_price = price_value if price_value > 0 else None
-
-    caption = LEXICON_CAPTION_RU["caption_text"](
-        first_name,
-        number,
-        year,
-        brand,
-        model,
-        color,
-        odometer,
-        engine,
-        drive,
-        transmission,
-        sale_date,
-        buy_now_price,
-    )
-    media_group = [InputMediaPhoto(media=car[1][0], caption=caption)]
-    media_group.extend([InputMediaPhoto(media=file_id) for file_id in car[1][1:]])
-    return media_group
-
-
-# Универсальная отправка media_group с обработкой ошибок.
-# Media group не поддерживает reply_markup, поэтому кнопка выбора авто
-# отправляется отдельным сообщением сразу под альбомом.
-async def safe_send_media_group(
-    callback: CallbackQuery, media_group, number, car
-) -> bool:
-    try:
-        await callback.message.answer_media_group(media=media_group)
-    except TelegramRetryAfter as e:
-        await asyncio.sleep(e.retry_after)
-        await callback.message.answer_media_group(media=media_group)
-    except TelegramBadRequest as e:
-        logger.warning(f"Ошибка TelegramBadRequest: {e}")
-        return False
-
-    button_text = f"✅ Авто № {number}"
-    callback_data = (
-        f"Лот №: {car[0]['Lot number']}-{car[0]['Make']}-{car[0]['Model Detail']}"
-    )
-    await callback.message.answer(
-        text="👇 Нажмите кнопку, чтобы получить расчёт цены под ключ в РБ:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text=button_text,
-                        callback_data=callback_data,
-                        style=ButtonStyle.PRIMARY,
-                    )
-                ]
-            ]
-        ),
-    )
     return True
 
 

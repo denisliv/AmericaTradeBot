@@ -21,10 +21,13 @@ class FakeRedis:
         return 1
 
 
+def make_manager(fake_redis: FakeRedis) -> SchedulerManager:
+    return SchedulerManager(bot=None, db_pool=None, redis_client=fake_redis)
+
+
 @pytest.mark.asyncio
 async def test_run_with_lock_executes_once():
-    manager = SchedulerManager()
-    manager._redis_client = FakeRedis()
+    manager = make_manager(FakeRedis())
     calls = []
 
     async def fake_job():
@@ -36,10 +39,9 @@ async def test_run_with_lock_executes_once():
 
 @pytest.mark.asyncio
 async def test_run_with_lock_skips_when_lock_exists():
-    manager = SchedulerManager()
     fake_redis = FakeRedis()
     fake_redis.store["lock:test"] = "occupied"
-    manager._redis_client = fake_redis
+    manager = make_manager(fake_redis)
     calls = []
 
     async def fake_job():
@@ -51,10 +53,9 @@ async def test_run_with_lock_skips_when_lock_exists():
 
 @pytest.mark.asyncio
 async def test_download_csv_wrapper_uses_redis_lock(monkeypatch):
-    manager = SchedulerManager()
     fake_redis = FakeRedis()
     fake_redis.store["lock:download_csv"] = "occupied"
-    manager._redis_client = fake_redis
+    manager = make_manager(fake_redis)
     calls = []
 
     async def fake_download_csv(url):

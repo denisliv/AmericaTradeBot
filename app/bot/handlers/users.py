@@ -18,7 +18,7 @@ from app.bot.keyboards.keyboards_inline import (
     create_url_keyboard,
 )
 from app.bot.keyboards.menu_button import get_main_menu_commands
-from app.infrastructure.database.db import (
+from app.infrastructure.database.users import (
     add_user,
     change_user_alive_status,
     get_user,

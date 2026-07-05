@@ -11,7 +11,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from psycopg_pool import AsyncConnectionPool
 
-from app.infrastructure.database.db import get_broadcast_recipients
+from app.infrastructure.database.users import get_broadcast_recipients
 from app.infrastructure.paths import POSTS_DIR
 from app.infrastructure.services.subscription_newsletter import NewsletterQueue
 

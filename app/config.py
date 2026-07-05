@@ -44,12 +44,30 @@ class CopartSettings:
 
 
 @dataclass
+class BitrixSettings:
+    webhook_url: str
+
+
+@dataclass
+class SchedulerSettings:
+    timezone: str
+    csv_interval_minutes: int
+    newsletter_hour: int
+    newsletter_minute: int
+    posts_day_of_week: str
+    posts_hour: int
+    posts_minute: int
+
+
+@dataclass
 class Config:
     bot: BotSettings
     db: DatabaseSettings
     redis: RedisSettings
     log: LogSettings
     copart: CopartSettings
+    bitrix: BitrixSettings
+    scheduler: SchedulerSettings
 
 
 def load_config(path: str | None = None) -> Config:
@@ -97,6 +115,18 @@ def load_config(path: str | None = None) -> Config:
 
     copart = CopartSettings(url=env("COPART_URL"))
 
+    bitrix = BitrixSettings(webhook_url=env("BITRIX_WEBHOOK_URL", default=""))
+
+    scheduler = SchedulerSettings(
+        timezone=env("SCHEDULER_TIMEZONE", default="Europe/Moscow"),
+        csv_interval_minutes=env.int("SCHEDULER_CSV_INTERVAL_MINUTES", default=60),
+        newsletter_hour=env.int("SCHEDULER_NEWSLETTER_HOUR", default=9),
+        newsletter_minute=env.int("SCHEDULER_NEWSLETTER_MINUTE", default=20),
+        posts_day_of_week=env("SCHEDULER_POSTS_DAY_OF_WEEK", default="wed"),
+        posts_hour=env.int("SCHEDULER_POSTS_HOUR", default=19),
+        posts_minute=env.int("SCHEDULER_POSTS_MINUTE", default=0),
+    )
+
     log_settings = LogSettings(
         level=env("LOG_LEVEL", default="INFO"),
         format=env(
@@ -113,4 +143,6 @@ def load_config(path: str | None = None) -> Config:
         redis=redis,
         log=log_settings,
         copart=copart,
+        bitrix=bitrix,
+        scheduler=scheduler,
     )
