@@ -1,10 +1,16 @@
 import asyncio
 import logging
+from typing import Awaitable, Callable
 
 from aiogram import Bot
+from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramRetryAfter
-from aiogram.types import InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    InputMediaVideo,
+)
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
@@ -12,11 +18,55 @@ from app.infrastructure.database.admin_mailing import (
     get_admin_mailing_waiting_user_ids,
     update_admin_mailing_status,
 )
+from app.infrastructure.services.safe_send import SendStatus, send_to_user_safely
 
 logger = logging.getLogger(__name__)
 
 _MAX_RETRY_ATTEMPTS = 3
 _RETRY_TOTAL_CAP_SECONDS = 120
+_PROGRESS_EVERY = 25
+
+
+def build_mailing_button_keyboard(
+    text_button: str, url_button: str
+) -> InlineKeyboardMarkup:
+    """Единая зеленая URL-кнопка рассылки (используется в превью и отправке)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=text_button,
+                    url=url_button,
+                    style=ButtonStyle.SUCCESS,
+                )
+            ]
+        ]
+    )
+
+
+def build_media_list(
+    media_items: list[dict],
+) -> list[InputMediaPhoto | InputMediaVideo]:
+    """Единый построитель InputMedia из media_items (рассылка и превью)."""
+    result: list[InputMediaPhoto | InputMediaVideo] = []
+    for item in media_items:
+        if item["type"] == "photo":
+            result.append(
+                InputMediaPhoto(
+                    media=item["file_id"],
+                    caption=item.get("caption"),
+                )
+            )
+        elif item["type"] == "video":
+            result.append(
+                InputMediaVideo(
+                    media=item["file_id"],
+                    caption=item.get("caption"),
+                )
+            )
+        else:
+            raise ValueError(f"Unsupported media type: {item['type']}")
+    return result
 
 
 class AdminMailingSender:
@@ -24,39 +74,6 @@ class AdminMailingSender:
 
     def __init__(self, bot: Bot) -> None:
         self.bot = bot
-
-    @staticmethod
-    async def get_keyboard(
-        text_button: str, url_button: str
-    ) -> InlineKeyboardMarkup:
-        keyboard_builder = InlineKeyboardBuilder()
-        keyboard_builder.button(text=text_button, url=url_button)
-        keyboard_builder.adjust(1)
-        return keyboard_builder.as_markup()
-
-    @staticmethod
-    def _build_media_list(
-        media_items: list[dict],
-    ) -> list[InputMediaPhoto | InputMediaVideo]:
-        result: list[InputMediaPhoto | InputMediaVideo] = []
-        for item in media_items:
-            if item["type"] == "photo":
-                result.append(
-                    InputMediaPhoto(
-                        media=item["file_id"],
-                        caption=item.get("caption"),
-                    )
-                )
-            elif item["type"] == "video":
-                result.append(
-                    InputMediaVideo(
-                        media=item["file_id"],
-                        caption=item.get("caption"),
-                    )
-                )
-            else:
-                raise ValueError(f"Unsupported media type: {item['type']}")
-        return result
 
     async def send_message(
         self,
@@ -86,50 +103,15 @@ class AdminMailingSender:
             )
             return False
 
-        total_wait = 0.0
-        last_error: Exception | None = None
-        for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
-            try:
-                await self.bot.copy_message(
-                    user_id,
-                    from_chat_id,
-                    message_id,
-                    reply_markup=keyboard,
-                )
-            except TelegramRetryAfter as e:
-                last_error = e
-                if (
-                    attempt >= _MAX_RETRY_ATTEMPTS
-                    or total_wait + e.retry_after > _RETRY_TOTAL_CAP_SECONDS
-                ):
-                    break
-                total_wait += e.retry_after
-                await asyncio.sleep(e.retry_after)
-                continue
-            except Exception as e:
-                await update_admin_mailing_status(
-                    conn,
-                    user_id=user_id,
-                    status="unsuccessful",
-                    description=str(e),
-                )
-                return False
-            else:
-                await update_admin_mailing_status(
-                    conn,
-                    user_id=user_id,
-                    status="success",
-                    description="No errors",
-                )
-                return True
+        async def _send() -> None:
+            await self.bot.copy_message(
+                user_id,
+                from_chat_id,
+                message_id,
+                reply_markup=keyboard,
+            )
 
-        await update_admin_mailing_status(
-            conn,
-            user_id=user_id,
-            status="unsuccessful",
-            description=f"retry_after exhausted: {last_error}",
-        )
-        return False
+        return await self._deliver(conn, user_id, _send)
 
     async def _send_album(
         self,
@@ -139,18 +121,28 @@ class AdminMailingSender:
         keyboard: InlineKeyboardMarkup | None = None,
         button_message_text: str = "👇",
     ) -> bool:
-        media_list = self._build_media_list(media_items)
+        media_list = build_media_list(media_items)
+
+        async def _send() -> None:
+            await self.bot.send_media_group(user_id, media=media_list)
+            if keyboard:
+                await self.bot.send_message(
+                    user_id,
+                    text=button_message_text,
+                    reply_markup=keyboard,
+                )
+
+        return await self._deliver(conn, user_id, _send)
+
+    async def _deliver(self, conn: AsyncConnection, user_id: int, send) -> bool:
+        """Отправка с ретраями на flood-limit и учетом статуса в admin_mailing."""
         total_wait = 0.0
         last_error: Exception | None = None
         for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
             try:
-                await self.bot.send_media_group(user_id, media=media_list)
-                if keyboard:
-                    await self.bot.send_message(
-                        user_id,
-                        text=button_message_text,
-                        reply_markup=keyboard,
-                    )
+                status, detail = await send_to_user_safely(
+                    send, conn=conn, user_id=user_id
+                )
             except TelegramRetryAfter as e:
                 last_error = e
                 if (
@@ -161,15 +153,8 @@ class AdminMailingSender:
                 total_wait += e.retry_after
                 await asyncio.sleep(e.retry_after)
                 continue
-            except Exception as e:
-                await update_admin_mailing_status(
-                    conn,
-                    user_id=user_id,
-                    status="unsuccessful",
-                    description=str(e),
-                )
-                return False
-            else:
+
+            if status is SendStatus.OK:
                 await update_admin_mailing_status(
                     conn,
                     user_id=user_id,
@@ -177,6 +162,13 @@ class AdminMailingSender:
                     description="No errors",
                 )
                 return True
+            await update_admin_mailing_status(
+                conn,
+                user_id=user_id,
+                status="unsuccessful",
+                description=detail or status.value,
+            )
+            return False
 
         await update_admin_mailing_status(
             conn,
@@ -196,17 +188,19 @@ class AdminMailingSender:
         text_button: str | None = None,
         url_button: str | None = None,
         button_message_text: str = "👇",
+        progress: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> int:
         keyboard = None
         if text_button and url_button:
-            keyboard = await self.get_keyboard(text_button, url_button)
+            keyboard = build_mailing_button_keyboard(text_button, url_button)
 
         count = 0
         try:
             async with db_pool.connection() as conn:
                 await conn.set_autocommit(True)
                 user_ids = await get_admin_mailing_waiting_user_ids(conn)
-                for uid in user_ids:
+                total = len(user_ids)
+                for processed, uid in enumerate(user_ids, 1):
                     success = await self.send_message(
                         conn,
                         int(uid),
@@ -219,6 +213,11 @@ class AdminMailingSender:
                     )
                     if success:
                         count += 1
+                    if progress and processed % _PROGRESS_EVERY == 0:
+                        try:
+                            await progress(processed, total)
+                        except Exception as e:
+                            logger.debug("Mailing progress report failed: %s", e)
                     await asyncio.sleep(0.1)
         finally:
             logger.info("Admin mailing finished: %s successful deliveries", count)

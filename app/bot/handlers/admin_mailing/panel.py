@@ -65,7 +65,11 @@ async def admin_exit_button_press(message: Message, state: FSMContext) -> None:
     await message.answer(
         text=LEXICON_RU["/start_text"](message.from_user.first_name),
         reply_markup=create_choice_keyboard(
-            "choose_a_car_button", "more_information_button", "contact_button", width=1
+            "choose_a_car_button",
+            "more_information_button",
+            "why_americatrade_button",
+            "contact_button",
+            width=1,
         ),
     )
 

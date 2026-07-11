@@ -44,99 +44,139 @@ def create_choice_keyboard(*buttons: ChoiceButton, width: int = 2) -> InlineKeyb
     return kb_builder.as_markup()
 
 
-# Функция, генерирующая клавиатуру для перехода на сайт
-def create_url_keyboard(back: bool = False, width: int = 2) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-
-    buttons = [
-        InlineKeyboardButton(
-            text=LEXICON_BUTTONS_RU["url_site_button"], url="https://americatrade.by"
-        ),
-        InlineKeyboardButton(
-            text=LEXICON_BUTTONS_RU["reviews_yandex_button"],
-            url="https://yandex.by/maps/org/america_trade/209802914458/reviews/?ll=27.562783%2C53.871084&z",
-        ),
-        InlineKeyboardButton(
-            text=LEXICON_BUTTONS_RU["reviews_google_button"],
-            url="https://www.google.com/maps/place/America+Trade/@53.8715902,27.5585072,16z/data=!4m8!3m7!1s0x46dbd10c8f4ca66d:0xc0b4e3cdc9108439!8m2!3d53.8711443!4d27.5627987!9m1!1b1!16s%2Fg%2F11wfs6slw5?entry=ttu&g_ep=EgoyMDI1MDcyMy4wIKXMDSoASAFQAw%3D%3D",
-        ),
-    ]
-
-    if back:
-        buttons.append(
-            InlineKeyboardButton(
-                text=LEXICON_BUTTONS_RU["back_to:main_menu"],
-                callback_data="back_to:main_menu",
-            )
-        )
-
-    kb.row(*buttons, width=width)
-    return kb.as_markup()
+SITE_URL = "https://americatrade.by"
+REVIEWS_YANDEX_URL = "https://yandex.by/maps/org/america_trade/209802914458/reviews/?ll=27.562783%2C53.871084&z"
+REVIEWS_GOOGLE_URL = "https://www.google.com/maps/place/America+Trade/@53.8715902,27.5585072,16z/data=!4m8!3m7!1s0x46dbd10c8f4ca66d:0xc0b4e3cdc9108439!8m2!3d53.8711443!4d27.5627987!9m1!1b1!16s%2Fg%2F11wfs6slw5?entry=ttu&g_ep=EgoyMDI1MDcyMy4wIKXMDSoASAFQAw%3D%3D"
 
 
-# Функция, генерирующая клавиатуру действий после выдачи авто/примеров.
-# Сами кнопки выбора авто/примера теперь идут отдельными сообщениями под
-# каждой медиагруппой (см. safe_send_media_group / _send_one_assisted_gallery_pick).
-def create_auto_keyboard(
-    *,
-    width: int = 1,
-    else_car: bool = True,
-    search_type: str = "self",
-) -> InlineKeyboardMarkup:
-    kb_builder = InlineKeyboardBuilder()
-
-    # Кнопки действий
-    action_buttons = []
-    if else_car:
-        if search_type == "assisted":
-            action_buttons.append(
-                InlineKeyboardButton(
-                    text=LEXICON_BUTTONS_RU["else_car_button"],
-                    callback_data="else_car_button_assisted",
-                )
-            )
-        else:
-            action_buttons.append(
-                InlineKeyboardButton(
-                    text=LEXICON_BUTTONS_RU["else_car_button"],
-                    callback_data="else_car_button_self",
-                )
-            )
-
-    action_buttons.extend(
-        [
-            InlineKeyboardButton(
-                text=LEXICON_BUTTONS_RU["new_search_button"],
-                callback_data="new_search_button_assisted"
-                if search_type == "assisted"
-                else "new_search_button_self",
-            ),
-            InlineKeyboardButton(
-                text=LEXICON_BUTTONS_RU["application_for_selection_button"],
-                callback_data="application_for_selection_button",
-                style=ButtonStyle.SUCCESS,
-            ),
-        ]
+# Функция, генерирующая клавиатуру экрана "✅ Контакт получен!"
+def create_contact_received_keyboard() -> InlineKeyboardMarkup:
+    return create_choice_keyboard(
+        "more_information_button",
+        "back_to:main_menu",
+        width=1,
     )
 
-    if search_type != "assisted":
-        action_buttons.append(
+
+# Функция, генерирующая клавиатуру раздела "⭐ Почему именно AmericaTrade?".
+# show_back добавляет кнопку "Назад" (возврат в хаб) - только при заходе из хаба
+def create_why_americatrade_keyboard(show_back: bool = False) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    buttons = [
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["free_consultation_button"],
+            callback_data="application_for_selection_button",
+            style=ButtonStyle.SUCCESS,
+        ),
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["reviews_yandex_long_button"],
+            url=REVIEWS_YANDEX_URL,
+        ),
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["reviews_google_long_button"],
+            url=REVIEWS_GOOGLE_URL,
+        ),
+    ]
+    if show_back:
+        buttons.append(
             InlineKeyboardButton(
-                text=LEXICON_BUTTONS_RU["subscription_button"],
-                callback_data=SubscribeCB(source="self").pack(),
+                text=LEXICON_BUTTONS_RU["back_button"],
+                callback_data="back_to:info_hub",
             )
         )
-
-    action_buttons.append(
+    buttons.append(
         InlineKeyboardButton(
             text=LEXICON_BUTTONS_RU["back_to:main_menu"],
             callback_data="back_to:main_menu",
         )
     )
+    kb.row(*buttons, width=1)
+    return kb.as_markup()
 
-    kb_builder.row(*action_buttons, width=width)
+
+# Функция, генерирующая клавиатуру экрана "Помощь и контакты"
+def create_contacts_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["url_site_button"], url=SITE_URL
+        ),
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["reviews_yandex_button"],
+            url=REVIEWS_YANDEX_URL,
+        ),
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["reviews_google_button"],
+            url=REVIEWS_GOOGLE_URL,
+        ),
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["free_consultation_button"],
+            callback_data="application_for_selection_button",
+            style=ButtonStyle.SUCCESS,
+        ),
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["back_button"],
+            callback_data="back_to:main_menu",
+        ),
+        width=1,
+    )
+    return kb.as_markup()
+
+
+# Функция, генерирующая клавиатуру действий после выдачи авто по марке/модели.
+# Кнопки расчета по конкретному авто идут отдельными сообщениями под
+# каждой медиагруппой (см. safe_send_media_group).
+def create_self_results_keyboard(*, else_car: bool = True) -> InlineKeyboardMarkup:
+    kb_builder = InlineKeyboardBuilder()
+
+    action_buttons = [
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["follow_model_button"],
+            callback_data=SubscribeCB(source="self").pack(),
+        ),
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["change_request_button"],
+            callback_data="change_request_button",
+        ),
+    ]
+    if else_car:
+        action_buttons.append(
+            InlineKeyboardButton(
+                text=LEXICON_BUTTONS_RU["else_car_button"],
+                callback_data="else_car_button_self",
+            )
+        )
+    action_buttons.append(
+        InlineKeyboardButton(
+            text=LEXICON_BUTTONS_RU["self_request_button"],
+            callback_data="self_request_button",
+            style=ButtonStyle.SUCCESS,
+        )
+    )
+
+    kb_builder.row(*action_buttons, width=1)
 
     return kb_builder.as_markup()
+
+
+# Функция, генерирующая клавиатуру экрана "👀 Оставьте ваш номер телефона..."
+def create_self_lead_keyboard() -> InlineKeyboardMarkup:
+    return create_choice_keyboard(
+        ("send_phone_inline", "send_my_phone_button", ButtonStyle.SUCCESS),
+        "change_request_button",
+        "back_to:main_menu",
+        width=1,
+    )
+
+
+# Функция, генерирующая клавиатуру действий после ТОП-подборки по кузову/бюджету
+def create_assisted_results_keyboard() -> InlineKeyboardMarkup:
+    return create_choice_keyboard(
+        ("change_request_assisted", "change_request_button"),
+        ("else_car_button_assisted", "else_car_button"),
+        ("self_request_button", "self_request_button", ButtonStyle.SUCCESS),
+        width=1,
+    )
 
 
 def format_date(created_at) -> str:
@@ -190,7 +230,7 @@ def create_subscriptions_keyboard(
     if show_back_button:
         kb_builder.add(
             InlineKeyboardButton(
-                text=LEXICON_BUTTONS_RU["back_to:more_info"],
+                text=LEXICON_BUTTONS_RU["back_button"],
                 callback_data="back_to:main_menu",
             )
         )

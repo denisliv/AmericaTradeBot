@@ -25,7 +25,7 @@ async def safe_send_media_group(
         logger.warning(f"Ошибка TelegramBadRequest: {e}")
         return False
 
-    button_text = f"✅ Авто № {number}"
+    button_text = f"📋 Получить детальный расчет Авто № {number}"
     callback_data = (
         f"Лот №: {car[0]['Lot number']}-{car[0]['Make']}-{car[0]['Model Detail']}"
     )

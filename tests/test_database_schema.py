@@ -7,17 +7,30 @@ def _read_migration(name: str) -> str:
     return (_VERSIONS_DIR / name).read_text(encoding="utf-8")
 
 
-def test_metrics_and_chat_history_tables_are_dropped():
-    ddl = _read_migration("0004_drop_grafana_ai_manager.py")
+def test_single_init_migration():
+    migrations = [
+        p.name for p in _VERSIONS_DIR.glob("*.py") if not p.name.startswith("__")
+    ]
+    assert migrations == ["0001_initial_schema.py"]
 
-    assert "DROP TABLE IF EXISTS bot_metrics_events" in ddl
-    assert "DROP TABLE IF EXISTS bot_delivery_metrics" in ddl
-    assert "DROP TABLE IF EXISTS chat_history" in ddl
 
-
-def test_assisted_selection_subscription_column_is_removed_by_migration_guard():
+def test_init_schema_creates_actual_tables_only():
     ddl = _read_migration("0001_initial_schema.py")
-    assert (
-        "ALTER TABLE assisted_selection_requests DROP COLUMN IF EXISTS subscription"
-        in ddl
-    )
+
+    assert "CREATE TABLE users" in ddl
+    assert "CREATE TABLE self_selection_requests" in ddl
+    assert "CREATE TABLE assisted_selection_requests" in ddl
+
+    # Grafana/AI-менеджер удалены из проекта: их таблиц не должно быть в схеме
+    assert "chat_history" not in ddl
+    assert "bot_metrics_events" not in ddl
+    assert "bot_delivery_metrics" not in ddl
+
+
+def test_init_schema_keeps_query_indexes():
+    ddl = _read_migration("0001_initial_schema.py")
+
+    assert "idx_users_role" in ddl
+    assert "idx_self_selection_subscription" in ddl
+    assert "idx_activity_user_day" in ddl
+    assert "idx_assisted_activity_user_day" in ddl

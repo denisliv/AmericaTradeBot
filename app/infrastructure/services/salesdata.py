@@ -157,6 +157,42 @@ async def get_data(user_dict: dict, count: int = 6) -> List[Tuple[dict, List[str
     return cars[:count]
 
 
+# Группы кузовов для случайной подборки в рассылке
+BODY_STYLE_GROUPS = {
+    "suv": lambda style: "SPORT UTILITY" in style
+    or style.startswith("SUV")
+    or style.startswith("4DR SPOR"),
+    "sedan": lambda style: style.startswith("SEDAN"),
+}
+
+
+# Случайное актуальное авто заданной группы кузова с HD-фото (для рассылки)
+async def get_random_car_with_images(
+    body_group: str, attempts: int = 10
+) -> Optional[Tuple[dict, List[str]]]:
+    matcher = BODY_STYLE_GROUPS.get(body_group)
+    if matcher is None:
+        return None
+
+    rows = await sales_data_cache.get_rows()
+    candidates = [
+        row
+        for row in rows
+        if matcher(row.get("Body Style", "").upper())
+        and row.get("Sale Date M/D/CY") != "0"
+    ]
+    if not candidates:
+        return None
+
+    sample = random.sample(candidates, k=min(attempts, len(candidates)))
+    async with aiohttp.ClientSession() as aio_session:
+        for row in sample:
+            images = await get_images(row, aio_session)
+            if images:
+                return row, images
+    return None
+
+
 # Функция загрузки данных в csv
 def _validate_sales_csv_bytes(content: bytes) -> None:
     if not content.strip():

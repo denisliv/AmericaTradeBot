@@ -26,9 +26,9 @@ class SelfSelectionRow(NamedTuple):
     auction_status: str
 
 
-class AssistedSelectionRow(NamedTuple):
-    id: int
+class NurtureRow(NamedTuple):
     user_id: int
-    created_at: datetime.datetime
-    body_style: str
-    budget: str
+    name: str | None
+    started_at: datetime.datetime
+    shift_days: int
+    last_step: int

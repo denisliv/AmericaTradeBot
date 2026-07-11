@@ -2,16 +2,25 @@
 
 import logging
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional
 
 from psycopg import AsyncConnection, sql
 
 from app.infrastructure.database.models import (
-    AssistedSelectionRow,
     SelfSelectionRow,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class SubscriptionOutcome(Enum):
+    """Результат попытки оформить подписку."""
+
+    ACTIVATED = "activated"
+    LIMIT_REACHED = "limit_reached"
+    ALREADY_SUBSCRIBED = "already_subscribed"
+    NOT_FOUND = "not_found"
 
 
 async def add_self_selection_request(
@@ -65,54 +74,21 @@ async def add_self_selection_request(
     )
 
 
-async def get_self_selection_request(
-    conn: AsyncConnection,
-    *,
-    user_id: int,
-) -> Optional[SelfSelectionRow]:
-    rows = await get_self_selection_requests(conn, user_id=user_id, limit=1)
-    return rows[0] if rows else None
-
-
-async def get_self_selection_requests(
-    conn: AsyncConnection,
-    *,
-    user_id: int,
-    limit: int = 5,
-) -> list[SelfSelectionRow]:
-    async with conn.cursor() as cursor:
-        data = await cursor.execute(
-            query="""
-                SELECT
-                    id,
-                    user_id,
-                    created_at,
-                    brand,
-                    model,
-                    year,
-                    odometer,
-                    auction_status
-                    FROM self_selection_requests WHERE user_id = %s
-                    ORDER BY created_at DESC
-                    LIMIT %s;
-            """,
-            params=(user_id, limit),
-        )
-        rows = await data.fetchall()
-        logger.info("Self-selection rows for user %s: %s", user_id, rows)
-        return [SelfSelectionRow(*row) for row in rows]
-
-
 async def set_subscription(
     conn: AsyncConnection,
     *,
     user_id: int,
     limit: int = 6,
     table: str = "self_selection_requests",
-) -> int:
+) -> tuple[SubscriptionOutcome, int]:
+    """Активирует подписку на последний поиск пользователя.
+
+    Returns:
+        tuple: (исход операции, актуальное число активных подписок).
+    """
     if table != "self_selection_requests":
         logger.error("Unsupported subscription table: %s", table)
-        return 0
+        return SubscriptionOutcome.NOT_FOUND, 0
 
     async with conn.transaction():
         async with conn.cursor() as cursor:
@@ -126,7 +102,7 @@ async def set_subscription(
             result = await cursor.fetchone()
             if not result:
                 logger.error("User with user_id %s not found", user_id)
-                return 0
+                return SubscriptionOutcome.NOT_FOUND, 0
 
             current_count = result[0]
 
@@ -135,7 +111,7 @@ async def set_subscription(
                 logger.info(
                     "User %s has reached subscription limit (%d)", user_id, limit
                 )
-                return limit
+                return SubscriptionOutcome.LIMIT_REACHED, current_count
 
             table_ident = sql.Identifier(table)
             # Находим последнюю запись пользователя (блокируем строку запроса).
@@ -155,7 +131,7 @@ async def set_subscription(
             result = await cursor.fetchone()
             if not result:
                 logger.error("No %s found for user %s", table, user_id)
-                return current_count
+                return SubscriptionOutcome.NOT_FOUND, current_count
 
             request_id, has_subscription = result
             if has_subscription:
@@ -164,7 +140,7 @@ async def set_subscription(
                     user_id,
                     request_id,
                 )
-                return current_count
+                return SubscriptionOutcome.ALREADY_SUBSCRIBED, current_count
 
             await cursor.execute(
                 query=sql.SQL(
@@ -197,7 +173,7 @@ async def set_subscription(
                 new_count,
             )
 
-            return new_count
+            return SubscriptionOutcome.ACTIVATED, new_count
 
 
 async def add_assisted_selection_request(
@@ -232,32 +208,6 @@ async def add_assisted_selection_request(
         body_style,
         budget,
     )
-
-
-async def get_assisted_selection_request(
-    conn: AsyncConnection,
-    *,
-    user_id: int,
-) -> Optional[AssistedSelectionRow]:
-    async with conn.cursor() as cursor:
-        data = await cursor.execute(
-            query="""
-                SELECT
-                    id,
-                    user_id,
-                    created_at,
-                    body_style,
-                    budget
-                    FROM assisted_selection_requests WHERE user_id = %s
-                    ORDER BY created_at DESC;
-            """,
-            params=(user_id,),
-        )
-        row = await data.fetchone()
-        logger.info("Assisted selection row is %s", row)
-        if row:
-            return AssistedSelectionRow(*row)
-    return None
 
 
 async def get_user_subscriptions(

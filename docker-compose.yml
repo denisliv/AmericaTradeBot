@@ -1,9 +1,8 @@
 # AmericaTrade: PostgreSQL + Redis + Telegram-бот
 # 1) Скопируйте env.example в .env и задайте секреты (BOT_TOKEN, пароли).
 # 2) Для Docker выставьте POSTGRES_HOST=postgres, REDIS_HOST=redis (см. env.example).
-# 3) Первый запуск:
-#    docker compose run --rm bot alembic upgrade head
-#    docker compose up -d
+# 3) Запуск: docker compose up -d
+#    (миграции применяются автоматически при старте сервиса bot)
 #
 name: americatrade
 
@@ -37,6 +36,8 @@ services:
 
   bot:
     build: .
+    # Миграции идемпотентны: на актуальной схеме upgrade head - мгновенный no-op
+    command: sh -c "alembic upgrade head && python main.py"
     env_file: .env
     environment:
       # Явно перебиваем localhost из локального .env при деплое через compose

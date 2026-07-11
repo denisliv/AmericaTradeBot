@@ -10,11 +10,14 @@ from psycopg.connection_async import AsyncConnection
 
 from app.bot.callback_data import SubscribeCB
 from app.bot.keyboards.keyboards_inline import (
-    create_auto_keyboard,
     create_choice_keyboard,
+    create_self_results_keyboard,
 )
 from app.bot.utils.media import safe_send_media_group
-from app.infrastructure.database.selections import set_subscription
+from app.infrastructure.database.selections import (
+    SubscriptionOutcome,
+    set_subscription,
+)
 from app.infrastructure.services.car_media import make_media_group
 from app.lexicon.lexicon_ru import LEXICON_RU
 
@@ -29,32 +32,35 @@ async def process_subscription_button_press(
 ):
     await state.clear()
     limit = 6
-    count = limit - await set_subscription(
+    outcome, active_count = await set_subscription(
         conn,
         user_id=callback.from_user.id,
         limit=limit,
         table="self_selection_requests",
     )
+    remaining = max(limit - active_count, 0)
 
-    if count != 0:
-        await callback.message.edit_text(
-            text=LEXICON_RU["yes_subscription_text"](count),
-            reply_markup=create_choice_keyboard(
-                "back_to:main_menu", "new_search_button_self"
-            ),
-        )
+    if outcome is SubscriptionOutcome.ACTIVATED:
+        text = LEXICON_RU["yes_subscription_text"](remaining)
+    elif outcome is SubscriptionOutcome.LIMIT_REACHED:
+        text = LEXICON_RU["no_subscription_text"](remaining)
+    elif outcome is SubscriptionOutcome.ALREADY_SUBSCRIBED:
+        text = LEXICON_RU["already_subscribed_text"](remaining)
     else:
-        await callback.message.edit_text(
-            text=LEXICON_RU["no_subscription_text"](count),
-            reply_markup=create_choice_keyboard(
-                "back_to:main_menu", "new_search_button_self"
-            ),
-        )
+        text = LEXICON_RU["subscription_unavailable_text"]
+
+    await callback.message.edit_text(
+        text=text,
+        reply_markup=create_choice_keyboard(
+            "back_to:main_menu", "change_request_button"
+        ),
+    )
     await callback.answer()
 
 
 @router.callback_query(
-    F.data == "else_car_button_self", flags={"long_operation": "typing"}
+    F.data == "else_car_button_self",
+    flags={"long_operation": "typing", "blocking": "blocking"},
 )
 async def process_else_car_button_press(
     callback: CallbackQuery,
@@ -70,9 +76,9 @@ async def process_else_car_button_press(
         await callback.message.answer(
             text=LEXICON_RU["no_more_cars_text"],
             reply_markup=create_choice_keyboard(
-                "new_search_button_self",
-                ("application_for_selection_button", ButtonStyle.SUCCESS),
-                (SubscribeCB(source="self"), "subscription_button"),
+                (SubscribeCB(source="self"), "follow_model_button"),
+                "change_request_button",
+                ("self_request_button", ButtonStyle.SUCCESS),
                 width=1,
             ),
         )
@@ -96,7 +102,5 @@ async def process_else_car_button_press(
 
     await callback.message.answer(
         text=LEXICON_RU["cars_describe_text"],
-        reply_markup=create_auto_keyboard(
-            else_car=len(remaining_data) > 0, search_type="self"
-        ),
+        reply_markup=create_self_results_keyboard(else_car=len(remaining_data) > 0),
     )

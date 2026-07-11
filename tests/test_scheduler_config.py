@@ -24,7 +24,12 @@ def test_create_scheduler_uses_schedule_from_config():
     )
 
     jobs = {job.id: job for job in manager.get_jobs()}
-    assert set(jobs) == {"download_csv", "daily_newsletter", "weekly_posts_broadcast"}
+    assert set(jobs) == {
+        "download_csv",
+        "daily_newsletter",
+        "weekly_posts_broadcast",
+        "nurture_chain",
+    }
 
     assert str(manager.scheduler.timezone) == "Europe/Minsk"
     assert jobs["download_csv"].trigger.interval.total_seconds() == 45 * 60

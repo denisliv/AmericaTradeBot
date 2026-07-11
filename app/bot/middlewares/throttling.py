@@ -37,8 +37,17 @@ class ThrottlingMiddleware(BaseMiddleware):
             nx=True,
         )
         if not was_set:
-            return await event.answer(
-                "Слишком много сообщений подряд. Подождите пару секунд."
+            # Предупреждаем один раз за окно, остальной флуд игнорируем молча
+            should_warn = await self.storage.redis.set(
+                name=f"throttle:warned:{user.id}",
+                value="1",
+                ex=self.COOLDOWN_SEC,
+                nx=True,
             )
+            if should_warn:
+                await event.answer(
+                    "Слишком много сообщений подряд. Подождите пару секунд."
+                )
+            return None
 
         return await handler(event, data)

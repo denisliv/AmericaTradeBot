@@ -39,20 +39,22 @@ from app.lexicon.lexicon_ru import LEXICON_ASSISTED_GALLERY_RU
 
 ASSISTED_GALLERY_ROOT: Final[Path] = ASSISTED_GALLERY_DIR
 
-# callback_data Telegram ≤ 64 байт; только ASCII
 BODY_DIR: Final[dict[str, str]] = {
-    "Седан": "sedan",
-    "Кроссовер": "suv",
-    "Электромобиль": "electric",
+    "🚙 Кроссовер/SUV": "suv",
+    "🚗 Седан/Хэтчбек": "sedan",
+    "⚡Электромобиль": "electric",
 }
 
+# Вариант "тип не выбран": подборка собирается по всем кузовам сразу
+ANY_BODY_KEY: Final[str] = "Еще не решил/разные варианты"
+
 BUDGET_DIR: Final[dict[str, str]] = {
-    "до 12.000$": "0-12k",
-    "12.000$ - 15.000$": "12k-15k",
-    "15.000$ - 20.000$": "15k-20k",
-    "20.000$ - 30.000$": "20k-30k",
-    "30.000$ - 50.000$": "30k-50k",
-    "50.000$+": "50k-plus",
+    "до 12 000$": "0-12k",
+    "12 000$ - 15 000$": "12k-15k",
+    "15 000$ - 20 000$": "15k-20k",
+    "20 000$ - 30 000$": "20k-30k",
+    "30 000$ - 50 000$": "30k-50k",
+    "50 000$ +": "50k-plus",
 }
 
 _IMAGE_SUFFIXES: Final[frozenset[str]] = frozenset(
@@ -90,40 +92,60 @@ def _list_images(car_dir: Path) -> list[Path]:
     return sorted(files, key=lambda x: x.name.lower())
 
 
-def pick_random_assisted_gallery(
+def pick_top_assisted_gallery(
     body_style_key: str,
     budget_key: str,
     *,
+    count: int = 3,
     max_photos: int = 5,
     root: Optional[Path] = None,
-) -> Optional[AssistedGalleryPick]:
-    """Случайная папка авто в категории и до ``max_photos`` снимков (без повторов)."""
+) -> list[AssistedGalleryPick]:
+    """ТОП-подборка: до ``count`` разных авто в категории и бюджете.
+
+    Для ``ANY_BODY_KEY`` авто выбираются по всем кузовам сразу (без привязки к типу).
+    Папки без изображений пропускаются; повторы по названию авто исключаются.
+    """
     base = root or ASSISTED_GALLERY_ROOT
-    body_slug = BODY_DIR.get(body_style_key)
     budget_slug = BUDGET_DIR.get(budget_key)
-    if not body_slug or not budget_slug:
-        return None
+    if not budget_slug:
+        return []
 
-    budget_path = base / body_slug / budget_slug
-    car_dirs = _list_car_dirs(budget_path)
-    if not car_dirs:
-        return None
+    if body_style_key == ANY_BODY_KEY:
+        body_keys = list(BODY_DIR)
+    elif body_style_key in BODY_DIR:
+        body_keys = [body_style_key]
+    else:
+        return []
 
-    car_dir = random.choice(car_dirs)
-    images = _list_images(car_dir)
-    if not images:
-        return None
+    candidates: list[tuple[str, Path]] = []
+    for body_key in body_keys:
+        budget_path = base / BODY_DIR[body_key] / budget_slug
+        candidates.extend((body_key, p) for p in _list_car_dirs(budget_path))
 
-    k = min(max_photos, len(images))
-    chosen = random.sample(images, k=k)
+    random.shuffle(candidates)
 
-    return AssistedGalleryPick(
-        car_folder=car_dir.name,
-        display_title=_folder_title(car_dir.name),
-        image_paths=chosen,
-        body_style_key=body_style_key,
-        budget_key=budget_key,
-    )
+    picks: list[AssistedGalleryPick] = []
+    seen_folders: set[str] = set()
+    for body_key, car_dir in candidates:
+        if len(picks) >= count:
+            break
+        if car_dir.name in seen_folders:
+            continue
+        images = _list_images(car_dir)
+        if not images:
+            continue
+        seen_folders.add(car_dir.name)
+        k = min(max_photos, len(images))
+        picks.append(
+            AssistedGalleryPick(
+                car_folder=car_dir.name,
+                display_title=_folder_title(car_dir.name),
+                image_paths=random.sample(images, k=k),
+                body_style_key=body_key,
+                budget_key=budget_key,
+            )
+        )
+    return picks
 
 
 def parse_ag_lead_callback(data: str) -> Optional[tuple[str, str, str, str]]:
@@ -140,6 +162,7 @@ def parse_ag_lead_callback(data: str) -> Optional[tuple[str, str, str, str]]:
 
 
 def make_ag_lead_callback(pick: AssistedGalleryPick) -> str:
+    # callback_data Telegram ≤ 64 байт
     body_slug = BODY_DIR[pick.body_style_key]
     budget_slug = BUDGET_DIR[pick.budget_key]
     raw = f"ag_lead|{pick.car_folder}|{body_slug}|{budget_slug}"
@@ -154,10 +177,11 @@ def make_ag_lead_callback(pick: AssistedGalleryPick) -> str:
     return f"ag_lead|{car}|{body_slug}|{budget_slug}"
 
 
-def build_assisted_gallery_media_group(
+def build_top_media_group(
     first_name: str,
     pick: AssistedGalleryPick,
 ) -> list[InputMediaPhoto]:
+    """Альбом одного авто из ТОП-подборки: подпись на первом фото."""
     caption = LEXICON_ASSISTED_GALLERY_RU["caption"](
         first_name,
         pick.display_title,

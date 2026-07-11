@@ -1,7 +1,5 @@
-import asyncio
 import logging
 import uuid
-from typing import Optional
 
 import redis.asyncio as redis
 from aiogram import Bot
@@ -12,7 +10,7 @@ from app.config import Config
 from app.infrastructure.services.daily_posts_broadcast import (
     send_weekly_posts_broadcast,
 )
-from app.infrastructure.services.promo_newsletter import start_promo_listener
+from app.infrastructure.services.nurture import send_due_nurture_messages
 from app.infrastructure.services.salesdata import download_csv
 from app.infrastructure.services.subscription_newsletter import send_daily_newsletter
 
@@ -41,8 +39,7 @@ class SchedulerManager:
         self._bot = bot
         self._db_pool = db_pool
         self._redis_client = redis_client
-        self._promo_listener_task: Optional[asyncio.Task] = None
-        self._promo_stop_event = asyncio.Event()
+        self._timezone = timezone
 
     async def _run_with_lock(
         self,
@@ -122,35 +119,24 @@ class SchedulerManager:
             minute,
         )
 
-    def start_promo_listener(self) -> None:
-        """Запускает слушатель Redis для промо-рассылок"""
-        if self._promo_listener_task and not self._promo_listener_task.done():
-            logger.info("Promo listener already running")
-            return
+    def add_nurture_job(self, interval_minutes: int = 10) -> None:
+        """Добавляет задачу отправки шагов прогревочной цепочки."""
+        self.scheduler.add_job(
+            self._nurture_wrapper,
+            trigger="interval",
+            minutes=interval_minutes,
+            id="nurture_chain",
+            name="Nurture chain messages",
+            replace_existing=True,
+        )
+        logger.info("Added nurture chain job with interval %d minutes", interval_minutes)
 
-        async def _listener_supervisor() -> None:
-            while not self._promo_stop_event.is_set():
-                try:
-                    await start_promo_listener(
-                        self._bot, self._db_pool, self._redis_client
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.error("Promo listener crashed: %s", e)
-                    try:
-                        await asyncio.wait_for(self._promo_stop_event.wait(), timeout=5)
-                    except asyncio.TimeoutError:
-                        pass
-                else:
-                    try:
-                        await asyncio.wait_for(self._promo_stop_event.wait(), timeout=1)
-                    except asyncio.TimeoutError:
-                        pass
-
-        self._promo_stop_event.clear()
-        self._promo_listener_task = asyncio.create_task(_listener_supervisor())
-        logger.info("Started Redis promo listener")
+    async def _nurture_wrapper(self) -> None:
+        await self._run_with_lock(
+            "lock:nurture_chain",
+            send_due_nurture_messages(self._bot, self._db_pool, self._timezone),
+            lock_ttl_seconds=600,
+        )
 
     async def _newsletter_wrapper(self) -> None:
         """Обертка для функции рассылки с передачей бота и пула соединений"""
@@ -175,30 +161,18 @@ class SchedulerManager:
         )
 
     def start(self) -> None:
-        """Запускает планировщик и слушатель промо-рассылок"""
+        """Запускает планировщик"""
         if not self._is_started:
             self.scheduler.start()
             self._is_started = True
             logger.info("Scheduler started")
 
-            # Запускаем слушатель промо-рассылок
-            self.start_promo_listener()
-
     async def shutdown(self) -> None:
-        """Останавливает планировщик и фоновый promo-listener корректно."""
+        """Останавливает планировщик корректно."""
         if self._is_started:
             self.scheduler.shutdown()
             self._is_started = False
             logger.info("Scheduler shutdown")
-        self._promo_stop_event.set()
-        if self._promo_listener_task and not self._promo_listener_task.done():
-            self._promo_listener_task.cancel()
-            try:
-                await self._promo_listener_task
-            except (asyncio.CancelledError, Exception) as exc:
-                if not isinstance(exc, asyncio.CancelledError):
-                    logger.exception("Promo listener shutdown error: %s", exc)
-        self._promo_listener_task = None
 
     def get_jobs(self) -> list:
         """Возвращает список активных задач"""
@@ -239,7 +213,7 @@ def create_scheduler(
         day_of_week=schedule.posts_day_of_week,
     )
 
-    # Промо-рассылка теперь обрабатывается через Redis Keyspace Notifications
-    # и запускается автоматически при истечении TTL
+    # Прогревочная цепочка сообщений (график в services/nurture.py)
+    scheduler_manager.add_nurture_job()
 
     return scheduler_manager

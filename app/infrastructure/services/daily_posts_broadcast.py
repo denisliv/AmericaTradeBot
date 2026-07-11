@@ -8,11 +8,13 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import TelegramRetryAfter
+from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from app.infrastructure.database.users import get_broadcast_recipients
 from app.infrastructure.paths import POSTS_DIR
+from app.infrastructure.services.safe_send import SendStatus, send_to_user_safely
 from app.infrastructure.services.subscription_newsletter import NewsletterQueue
 
 logger = logging.getLogger(__name__)
@@ -40,24 +42,18 @@ def pick_post_for_current_week() -> Optional[tuple[Path, str]]:
     return path, text
 
 
-async def send_post_to_user(bot: Bot, user_id: int, text: str) -> tuple[bool, str]:
-    try:
+async def send_post_to_user(
+    bot: Bot, conn: AsyncConnection, user_id: int, text: str
+) -> tuple[SendStatus, str]:
+    async def _send() -> None:
         await bot.send_message(chat_id=user_id, text=text, parse_mode=None)
-        return True, ""
+
+    try:
+        return await send_to_user_safely(_send, conn=conn, user_id=user_id)
     except TelegramRetryAfter as e:
-        wait_time = e.retry_after
-        logger.warning("Rate limited for user %s, waiting %ss", user_id, wait_time)
-        await asyncio.sleep(wait_time)
-        return False, f"Rate limited, retry after {wait_time}s"
-    except TelegramBadRequest as e:
-        error_msg = str(e)
-        if "chat not found" in error_msg or "bot was blocked" in error_msg:
-            return False, "User blocked bot"
-        if "user is deactivated" in error_msg:
-            return False, "User deactivated"
-        return False, f"Bad request: {error_msg}"
-    except Exception as e:
-        return False, f"Unexpected error: {e!s}"
+        logger.warning("Rate limited for user %s, waiting %ss", user_id, e.retry_after)
+        await asyncio.sleep(e.retry_after)
+        return SendStatus.ERROR, f"Rate limited, retry after {e.retry_after}s"
 
 
 async def send_weekly_posts_broadcast(bot: Bot, db_pool: AsyncConnectionPool) -> None:
@@ -71,64 +67,68 @@ async def send_weekly_posts_broadcast(bot: Bot, db_pool: AsyncConnectionPool) ->
     )
 
     async with db_pool.connection() as conn:
+        # Обновления is_alive при блокировках должны фиксироваться сразу
+        await conn.set_autocommit(True)
         recipients = await get_broadcast_recipients(conn)
 
-    if not recipients:
-        logger.info("No recipients for weekly posts broadcast")
-        return
+        if not recipients:
+            logger.info("No recipients for weekly posts broadcast")
+            return
 
-    logger.info(
-        "Weekly posts broadcast %s to %d users (%d chars)",
-        path.name,
-        len(recipients),
-        len(text),
-    )
-
-    queue = NewsletterQueue(
-        max_retries=3,
-        batch_size=30,
-        delay_between_batches=1.0,
-    )
-    for row in recipients:
-        await queue.add_subscriber(row)
-
-    while not queue.is_empty():
-        batch = await queue.get_batch()
-        if not batch:
-            break
-
-        logger.info("Posts broadcast batch: %d users", len(batch))
-        results = await asyncio.gather(
-            *(
-                send_post_to_user(bot, subscriber.user_id, text)
-                for subscriber, _ in batch
-            ),
-            return_exceptions=True,
+        logger.info(
+            "Weekly posts broadcast %s to %d users (%d chars)",
+            path.name,
+            len(recipients),
+            len(text),
         )
-        for (subscriber, retry_count), result in zip(batch, results, strict=True):
-            if isinstance(result, Exception):
+
+        queue = NewsletterQueue(
+            max_retries=3,
+            batch_size=20,
+            delay_between_batches=1.0,
+        )
+        for row in recipients:
+            await queue.add_subscriber(row)
+
+        while not queue.is_empty():
+            batch = await queue.get_batch()
+            if not batch:
+                break
+
+            logger.info("Posts broadcast batch: %d users", len(batch))
+            results = await asyncio.gather(
+                *(
+                    send_post_to_user(bot, conn, subscriber.user_id, text)
+                    for subscriber, _ in batch
+                ),
+                return_exceptions=True,
+            )
+            for (subscriber, retry_count), result in zip(batch, results, strict=True):
+                if isinstance(result, Exception):
+                    await queue.add_retry(subscriber, retry_count)
+                    logger.warning(
+                        "Unexpected exception in posts broadcast for user %s: %s",
+                        subscriber.user_id,
+                        result,
+                    )
+                    continue
+                status, error_msg = result
+                if status is SendStatus.OK:
+                    logger.debug("Post sent to user %s", subscriber.user_id)
+                    continue
+                if status is SendStatus.BLOCKED:
+                    logger.warning(
+                        "User %s blocked bot or deactivated", subscriber.user_id
+                    )
+                    continue
                 await queue.add_retry(subscriber, retry_count)
                 logger.warning(
-                    "Unexpected exception in posts broadcast for user %s: %s",
+                    "Failed posts broadcast to user %s: %s",
                     subscriber.user_id,
-                    result,
+                    error_msg,
                 )
-                continue
-            success, error_msg = result
-            if success:
-                logger.debug("Post sent to user %s", subscriber.user_id)
-                continue
-            if "blocked" in error_msg or "deactivated" in error_msg:
-                logger.warning("User %s blocked bot or deactivated", subscriber.user_id)
-                continue
-            await queue.add_retry(subscriber, retry_count)
-            logger.warning(
-                "Failed posts broadcast to user %s: %s",
-                subscriber.user_id,
-                error_msg,
-            )
 
-        if not queue.is_empty():
-            await asyncio.sleep(queue.delay_between_batches)
+            if not queue.is_empty():
+                await asyncio.sleep(queue.delay_between_batches)
 
     logger.info("Weekly posts broadcast completed (%s)", path.name)

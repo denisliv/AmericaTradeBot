@@ -5,8 +5,8 @@ class FSMFillSelfSelectionForm(StatesGroup):
     get_brand = State()
     get_model = State()
     get_year = State()
-    get_odometer = State()
     get_auction_status = State()
+    get_manual_request = State()
 
 
 class FSMFillAssistedSelectionForm(StatesGroup):
@@ -15,9 +15,4 @@ class FSMFillAssistedSelectionForm(StatesGroup):
 
 
 class FSMFillConsultationRequestForm(StatesGroup):
-    get_name = State()
-    get_phone = State()
-
-
-class FSMFillPhoneForm(StatesGroup):
     get_phone = State()

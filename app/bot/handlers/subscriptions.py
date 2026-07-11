@@ -134,7 +134,7 @@ async def process_view_subscription(
             ).pack(),
         ),
         (
-            LEXICON_BUTTONS_RU["back_to:more_info"],
+            LEXICON_BUTTONS_RU["back_button"],
             f"view_{callback_data.source}_selection_subscriptions",
         ),
         (LEXICON_BUTTONS_RU["back_to:main_menu"], "back_to:main_menu"),

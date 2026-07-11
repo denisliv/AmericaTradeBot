@@ -1,6 +1,7 @@
 import pytest
 
 from app.infrastructure.services import subscription_newsletter as newsletter
+from app.infrastructure.services.safe_send import SendStatus
 
 
 @pytest.mark.asyncio
@@ -23,8 +24,8 @@ async def test_process_newsletter_batch_retries_on_failure(monkeypatch):
 
     async def fake_send_newsletter_to_user(bot, subscriber, conn):
         if subscriber.user_id == 1:
-            return True, ""
-        return False, "temporary error"
+            return SendStatus.OK, ""
+        return SendStatus.ERROR, "temporary error"
 
     async def fake_add_retry(subscriber, retry_count):
         retried.append((subscriber, retry_count))
@@ -63,8 +64,8 @@ async def test_send_newsletter_to_user_ignores_assisted_subscriptions(monkeypatc
     monkeypatch.setattr(newsletter, "send_self_selection_cars", fake_send_self_selection_cars)
     monkeypatch.setattr(newsletter, "get_cars_for_self_selection", fake_get_cars_for_self_selection)
 
-    success, error = await newsletter.send_newsletter_to_user(None, subscriber, None)
+    status, error = await newsletter.send_newsletter_to_user(None, subscriber, None)
 
-    assert success is True
+    assert status is SendStatus.OK
     assert error == ""
     assert calls == {"self": 0, "assisted": 0}

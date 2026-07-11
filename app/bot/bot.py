@@ -21,7 +21,6 @@ from app.bot.middlewares.activity_tracker import ActivityTrackerMiddleware
 from app.bot.middlewares.chat_action import ChatActionMiddleware
 from app.bot.middlewares.database import DataBaseMiddleware
 from app.bot.middlewares.limit_action import LimitActionMiddleware
-from app.bot.middlewares.redis import RedisMiddleware
 from app.bot.middlewares.shadow_ban import ShadowBanMiddleware
 from app.bot.middlewares.throttling import ThrottlingMiddleware
 from app.bot.scheduler import create_scheduler
@@ -57,7 +56,7 @@ async def main(config: Config) -> None:
 
     storage = RedisStorage(redis=redis_storage_client)
 
-    # Отдельный Redis клиент для промо-логики (другая БД)
+    # Отдельный Redis клиент для распределенных локов планировщика (другая БД)
     redis = Redis(
         db=config.redis.promo_db,
         host=config.redis.host,
@@ -105,7 +104,6 @@ async def main(config: Config) -> None:
     logger.info("Including middlewares...")
     dp.update.middleware(DataBaseMiddleware())
     dp.update.middleware(ShadowBanMiddleware())
-    dp.update.middleware(RedisMiddleware(redis))
     dp.update.middleware(ActivityTrackerMiddleware())
     dp.callback_query.middleware(ChatActionMiddleware())
     dp.callback_query.middleware(LimitActionMiddleware(storage=storage))

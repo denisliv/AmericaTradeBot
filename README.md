@@ -116,14 +116,7 @@ CREATE DATABASE america_trade;
 uv run alembic upgrade head
 ```
 
-Если у вас уже есть существующая БД, схема которой была создана старым скриптом `migrations/create_tables.py`, отметьте начальную ревизию как применённую перед накатом новых:
-
-```bash
-uv run alembic stamp 0001
-uv run alembic upgrade head
-```
-
-Все DDL управляются Alembic-миграциями в `alembic/versions/`. Runtime-инициализация схемы при старте бота больше не выполняется.
+Все DDL управляются Alembic-миграциями в `alembic/versions/`. Runtime-инициализация схемы при старте бота не выполняется.
 
 ### 6. Запуск бота
 
@@ -219,34 +212,22 @@ nano .env
 docker compose build
 ```
 
-### Шаг 5. Применить миграции (первый запуск и после смены DDL)
-
-Поднимутся зависимости (Postgres/Redis), выполнится команда миграций:
-
-```bash
-docker compose run --rm bot alembic upgrade head
-```
-
-Для миграции с уже существующей БД (схема создана старым `migrations/create_tables.py`):
-
-```bash
-docker compose run --rm bot alembic stamp 0001
-docker compose run --rm bot alembic upgrade head
-```
-
-Убедитесь в логах, что миграции применились без ошибок.
-
-### Шаг 6. Запустить стек в фоне
+### Шаг 5. Запустить стек в фоне
 
 ```bash
 docker compose up -d
 ```
 
+Миграции Alembic применяются автоматически при старте сервиса `bot`
+(команда `alembic upgrade head && python main.py` в `docker-compose.yml`);
+на актуальной схеме это мгновенный no-op. Убедитесь в логах, что миграции
+применились без ошибок.
+
 Сервисы: **postgres** (том `postgres_data`), **redis** (том `redis_data`, AOF), **bot**.
 
 Порты PostgreSQL и Redis **наружу не пробрасываются** — доступ только между контейнерами. Для Telegram long polling **входящие** подключения к серверу не нужны (нужен исходящий интернет).
 
-### Шаг 7. Проверить логи бота
+### Шаг 6. Проверить логи бота
 
 ```bash
 docker compose logs -f bot
@@ -264,6 +245,5 @@ docker compose up -d
 ```bash
 git pull
 docker compose build
-docker compose run --rm bot alembic upgrade head   # если есть новые миграции
-docker compose up -d
+docker compose up -d   # новые миграции применятся автоматически при старте
 ```

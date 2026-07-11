@@ -34,10 +34,19 @@ async def sender_decide(
     db_pool: AsyncConnectionPool,
 ) -> None:
     data = await state.get_data()
+    # Состояние сбрасывается до старта: повторное нажатие "Подтвердить"
+    # не пройдет StateFilter и не запустит вторую параллельную рассылку
+    await state.clear()
     sender = AdminMailingSender(callback.bot)
 
     if callback.data == "confirm_sender":
-        await callback.message.edit_text("Начинаю рассылку", reply_markup=None)
+        status_message = await callback.message.edit_text(
+            "Начинаю рассылку", reply_markup=None
+        )
+
+        async def report_progress(processed: int, total: int) -> None:
+            await status_message.edit_text(f"Рассылка: {processed}/{total}…")
+
         try:
             try:
                 payload = mailing_payload_from_state(data)
@@ -56,6 +65,7 @@ async def sender_decide(
                 text_button=payload["text_button"],
                 url_button=payload["url_button"],
                 button_message_text=payload["button_message_text"],
+                progress=report_progress,
             )
             await callback.message.answer(
                 f"Успешно разослали рекламное сообщение [{count}] пользователям"
@@ -71,5 +81,4 @@ async def sender_decide(
     elif callback.data == "cancel_sender":
         await callback.message.edit_text("Отменил рассылку", reply_markup=None)
 
-    await state.clear()
     await callback.answer()

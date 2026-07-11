@@ -4,13 +4,14 @@ from typing import List, Tuple
 
 from aiogram import Bot
 from aiogram.enums import ButtonStyle
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from psycopg_pool import AsyncConnectionPool
 
 from app.infrastructure.database.selections import get_user_subscriptions
 from app.infrastructure.database.users import get_active_subscribers
 from app.infrastructure.services.car_media import make_media_group
+from app.infrastructure.services.safe_send import SendStatus, send_to_user_safely
 from app.infrastructure.services.salesdata import get_data
 from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU, LEXICON_NEWSLETTER_RU, LEXICON_RU
 
@@ -72,6 +73,9 @@ async def send_self_selection_cars(
             any_sent = True
             await asyncio.sleep(0.5)  # пауза между автомобилями
 
+        except (TelegramForbiddenError, TelegramRetryAfter):
+            # Блокировку и flood-limit обрабатывает уровень отправки пользователю
+            raise
         except Exception as e:
             logger.error(f"Error sending car {i} to user {subscriber.user_id}: {e}")
             logger.error(f"Car data: {car}")
@@ -189,11 +193,11 @@ async def process_newsletter_batch(
                 result,
             )
             continue
-        success, error_msg = result
-        if success:
+        status, error_msg = result
+        if status is SendStatus.OK:
             logger.debug("Newsletter sent to user %s", subscriber.user_id)
             continue
-        if "blocked" in error_msg or "deactivated" in error_msg:
+        if status is SendStatus.BLOCKED:
             logger.warning("User %s blocked bot or deactivated", subscriber.user_id)
             continue
         await queue.add_retry(subscriber, retry_count)
@@ -204,49 +208,31 @@ async def process_newsletter_batch(
         )
 
 
-async def send_newsletter_to_user(bot: Bot, subscriber, conn) -> tuple[bool, str]:
-    """
-    Отправляет рассылку пользователю с данными об автомобилях
+async def send_newsletter_to_user(bot: Bot, subscriber, conn) -> tuple[SendStatus, str]:
+    """Sends subscription cars to one user.
 
     Returns:
-        tuple: (success: bool, error_message: str)
+        tuple: (SendStatus, error_message)
     """
-    try:
-        # Получаем подписки пользователя
+
+    async def _send() -> None:
         self_selection_subs = await get_user_subscriptions(
             conn, user_id=subscriber.user_id
         )
-
-        messages_sent = 0
-
-        # Обрабатываем self selection подписки
         for subscription in self_selection_subs:
             cars_data = await get_cars_for_self_selection(subscription)
-            messages_sent += await send_self_selection_cars(bot, subscriber, cars_data)
+            await send_self_selection_cars(bot, subscriber, cars_data)
 
-        logger.debug(f"Sent {messages_sent} messages to user {subscriber.user_id}")
-        return True, ""
-
-    except TelegramRetryAfter as e:
-        # Telegram просит подождать
-        wait_time = e.retry_after
-        logger.warning(
-            f"Rate limited for user {subscriber.user_id}, waiting {wait_time}s"
+    try:
+        return await send_to_user_safely(
+            _send, conn=conn, user_id=subscriber.user_id
         )
-        await asyncio.sleep(wait_time)
-        return False, f"Rate limited, retry after {wait_time}s"
-
-    except TelegramBadRequest as e:
-        error_msg = str(e)
-        if "chat not found" in error_msg or "bot was blocked" in error_msg:
-            return False, "User blocked bot"
-        elif "user is deactivated" in error_msg:
-            return False, "User deactivated"
-        else:
-            return False, f"Bad request: {error_msg}"
-
-    except Exception as e:
-        return False, f"Unexpected error: {str(e)}"
+    except TelegramRetryAfter as e:
+        logger.warning(
+            f"Rate limited for user {subscriber.user_id}, waiting {e.retry_after}s"
+        )
+        await asyncio.sleep(e.retry_after)
+        return SendStatus.ERROR, f"Rate limited, retry after {e.retry_after}s"
 
 
 async def send_daily_newsletter(bot: Bot, db_pool: AsyncConnectionPool) -> None:
@@ -271,10 +257,13 @@ async def send_daily_newsletter(bot: Bot, db_pool: AsyncConnectionPool) -> None:
 
             logger.info(f"Found {len(subscribers)} active subscribers")
 
+            # Обновления is_alive при блокировках должны фиксироваться сразу
+            await conn.set_autocommit(True)
+
             # Создаем очередь и добавляем подписчиков
             queue = NewsletterQueue(
                 max_retries=3,
-                batch_size=30,  # Отправляем по 30 сообщений за раз
+                batch_size=20,  # Ниже лимита Telegram (~30/сек) с запасом
                 delay_between_batches=1.0,  # Пауза 1 секунда между батчами
             )
 

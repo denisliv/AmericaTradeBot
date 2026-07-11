@@ -8,12 +8,7 @@ from typing import Awaitable, Callable
 
 from aiogram import Bot, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import (
-    InputMediaPhoto,
-    InputMediaVideo,
-    Message,
-    ReplyKeyboardRemove,
-)
+from aiogram.types import Message, ReplyKeyboardRemove
 from psycopg import AsyncConnection
 
 from app.bot.enums.roles import UserRole
@@ -27,6 +22,7 @@ from app.bot.states.admin_mailing import FSMAdminMailing
 from app.bot.states.admin_panel import FSMAdminPanel
 from app.bot.utils.admin_dashboard_text import format_admin_kpi_html
 from app.infrastructure.database.users import get_admin_kpi_summary
+from app.infrastructure.services.admin_mailing_sender import build_media_list
 from app.lexicon.lexicon_ru import (
     LEXICON_ADMIN_BUTTONS_RU,
     LEXICON_ADMIN_RU,
@@ -152,6 +148,7 @@ async def handle_panel_during_moderation_input(
             reply_markup=create_choice_keyboard(
                 "choose_a_car_button",
                 "more_information_button",
+                "why_americatrade_button",
                 "contact_button",
                 width=1,
             ),
@@ -182,43 +179,6 @@ async def handle_panel_during_moderation_input(
     return False
 
 
-def build_media_from_messages(
-    messages: list[Message],
-) -> list[InputMediaPhoto | InputMediaVideo]:
-    media_list: list[InputMediaPhoto | InputMediaVideo] = []
-    caption: str | None = None
-    for msg in sorted(messages, key=lambda m: m.message_id):
-        if msg.photo:
-            file_id = msg.photo[-1].file_id
-            if caption is None and msg.caption:
-                caption = msg.caption
-            media_list.append(InputMediaPhoto(media=file_id, caption=caption))
-            caption = None
-        elif msg.video:
-            file_id = msg.video.file_id
-            if caption is None and msg.caption:
-                caption = msg.caption
-            media_list.append(InputMediaVideo(media=file_id, caption=caption))
-            caption = None
-    return media_list
-
-
-def build_media_list_from_state(
-    media_items: list[dict],
-) -> list[InputMediaPhoto | InputMediaVideo]:
-    result: list[InputMediaPhoto | InputMediaVideo] = []
-    for item in media_items:
-        if item["type"] == "photo":
-            result.append(
-                InputMediaPhoto(media=item["file_id"], caption=item.get("caption"))
-            )
-        else:
-            result.append(
-                InputMediaVideo(media=item["file_id"], caption=item.get("caption"))
-            )
-    return result
-
-
 async def process_album_after_delay(
     media_group_id: str,
     state: FSMContext,
@@ -229,18 +189,14 @@ async def process_album_after_delay(
     messages = await album_buffer.pop(media_group_id)
     if not messages:
         return
-    messages.sort(key=lambda m: m.message_id)
-    media_list = build_media_from_messages(messages)
-    if not media_list:
-        await bot.send_message(
-            chat_id, "Не удалось обработать альбом. Отправь фото или видео."
-        )
-        return
 
     sorted_msgs = sorted(messages, key=lambda m: m.message_id)
+    # Telegram может прикрепить подпись альбома к любому сообщению медиагруппы,
+    # поэтому ищем ее по всем и ставим первому элементу
+    album_caption = next((m.caption for m in sorted_msgs if m.caption), None)
     media_items: list[dict] = []
-    for i, m in enumerate(sorted_msgs):
-        cap = m.caption if i == 0 else None
+    for m in sorted_msgs:
+        cap = album_caption if not media_items else None
         if m.photo:
             media_items.append(
                 {"type": "photo", "file_id": m.photo[-1].file_id, "caption": cap}
@@ -249,6 +205,12 @@ async def process_album_after_delay(
             media_items.append(
                 {"type": "video", "file_id": m.video.file_id, "caption": cap}
             )
+
+    if not media_items:
+        await bot.send_message(
+            chat_id, "Не удалось обработать альбом. Отправь фото или видео."
+        )
+        return
 
     await state.update_data(
         message_ids=[m.message_id for m in sorted_msgs],
@@ -276,7 +238,7 @@ async def admin_confirm(
 ) -> None:
     is_album = state_data.get("is_album", False)
     if is_album and state_data.get("media_items"):
-        media_list = build_media_list_from_state(state_data["media_items"])
+        media_list = build_media_list(state_data["media_items"])
         await bot.send_media_group(chat_id, media=media_list)
         if reply_markup:
             button_text = state_data.get("button_message_text", "👇")

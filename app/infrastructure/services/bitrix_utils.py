@@ -10,6 +10,16 @@ _BITRIX_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5)
 _BITRIX_MAX_ATTEMPTS = 3
 
 
+def _strip_non_bmp(text: str) -> str:
+    """Remove characters outside the Unicode BMP (e.g. most emoji).
+
+    Bitrix stores COMMENTS in MySQL utf8 (3-byte), which truncates the value
+    at the first 4-byte character, losing everything after it.
+    """
+    cleaned = "".join(ch for ch in text if ord(ch) <= 0xFFFF)
+    return " ".join(cleaned.split())
+
+
 def _get_bitrix_base_url(webhook_url: str) -> str:
     raw_url = webhook_url.strip()
     if not raw_url:
@@ -30,48 +40,56 @@ def _build_fields(tg_login: str, tg_id: int, data: dict, method: str) -> dict:
     telegram_value = f"@{tg_login}" if tg_login else str(tg_id)
 
     if method == "consultation_request":
-        return {
-            "FIELDS[TITLE]": "Консультация (TgBot)",
-            "FIELDS[NAME]": data.get("name", ""),
-            "FIELDS[PHONE][0][VALUE]": data.get("phone", ""),
-            "FIELDS[PHONE][0][VALUE_TYPE]": "Мобильный",
-            "FIELDS[IM][0][VALUE]": telegram_value,
-            "FIELDS[IM][0][VALUE_TYPE]": "Telegram",
-        }
-
-    if method == "self_selection":
-        lot_description = data.get("lot").split("-")
-        lot_number = lot_description[0][7:]
-        brand = lot_description[1]
-        model = lot_description[2]
-        return {
-            "FIELDS[TITLE]": f"{brand} {model} (TgBot)",
-            "FIELDS[NAME]": data.get("name", ""),
-            "FIELDS[PHONE][0][VALUE]": data.get("phone", ""),
-            "FIELDS[PHONE][0][VALUE_TYPE]": "Мобильный",
-            "FIELDS[IM][0][VALUE]": telegram_value,
-            "FIELDS[IM][0][VALUE_TYPE]": "Telegram",
-            "FIELDS[COMMENTS]": (
-                f"Лот №: {lot_number} | https://www.copart.com/lot/{lot_number}/"
-            ),
-        }
-
-    if method == "assisted_gallery":
-        car_title = data.get("car_title", "")
+        brand = data.get("brand", "")
+        model = data.get("model", "")
+        year = data.get("year", "")
         body_style = data.get("body_style", "")
         budget = data.get("budget", "")
-        return {
-            "FIELDS[TITLE]": f"Пример из галереи: {car_title} (TgBot)",
+        car_title = data.get("car_title", "")
+        lot = data.get("lot", "")
+        request_details = data.get("request_details", "")
+        source = data.get("source", "")
+
+        # Тип запроса: из рассылки / с выбранными критериями / просто консультация
+        if source == "nurture":
+            category = "По рассылке"
+        elif any(
+            [brand, model, year, body_style, budget, car_title, lot, request_details]
+        ):
+            category = "Заявка"
+        else:
+            category = "Консультация"
+
+        fields = {
+            "FIELDS[TITLE]": f"AmericaTradeBot | {category}",
             "FIELDS[NAME]": data.get("name", ""),
             "FIELDS[PHONE][0][VALUE]": data.get("phone", ""),
             "FIELDS[PHONE][0][VALUE_TYPE]": "Мобильный",
             "FIELDS[IM][0][VALUE]": telegram_value,
             "FIELDS[IM][0][VALUE_TYPE]": "Telegram",
-            "FIELDS[COMMENTS]": (
-                f"Assisted selection (галерея): {car_title} | "
-                f"Кузов: {body_style} | Бюджет: {budget}"
-            ),
         }
+
+        parts = []
+        if brand:
+            parts.append(f"Марка: {brand}")
+        if model:
+            parts.append(f"Модель: {model}")
+        if year:
+            parts.append(f"Год: {year}")
+        if body_style:
+            parts.append(f"Тип авто: {body_style}")
+        if budget:
+            parts.append(f"Бюджет: {budget}")
+        if car_title and lot:
+            parts.append(f"Авто: {car_title}")
+            parts.append(f"Лот №: {lot} | https://www.copart.com/lot/{lot}/")
+        elif car_title:
+            parts.append(f"Пример: {car_title}")
+        if request_details:
+            parts.append(f"Запрос клиента: {request_details}")
+        if parts:
+            fields["FIELDS[COMMENTS]"] = _strip_non_bmp(" | ".join(parts))
+        return fields
 
     raise ValueError(f"Unsupported bitrix method: {method}")
 
