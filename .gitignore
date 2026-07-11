@@ -58,9 +58,9 @@ Thumbs.db
 .pgadmin_data/
 
 # Content supplied per environment (dirs kept via .gitkeep)
-data/salesdata.csv
-data/posts/*
-!data/posts/.gitkeep
+data/**
+!data/**/
+!data/**/.gitkeep
 
 # Logs
 *.log
@@ -115,5 +115,3 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-*.jpeg
-*.jpg

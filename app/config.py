@@ -122,7 +122,7 @@ def load_config(path: str | None = None) -> Config:
         csv_interval_minutes=env.int("SCHEDULER_CSV_INTERVAL_MINUTES", default=60),
         newsletter_hour=env.int("SCHEDULER_NEWSLETTER_HOUR", default=9),
         newsletter_minute=env.int("SCHEDULER_NEWSLETTER_MINUTE", default=20),
-        posts_day_of_week=env("SCHEDULER_POSTS_DAY_OF_WEEK", default="wed"),
+        posts_day_of_week=env("SCHEDULER_POSTS_DAY_OF_WEEK", default="sun"),
         posts_hour=env.int("SCHEDULER_POSTS_HOUR", default=19),
         posts_minute=env.int("SCHEDULER_POSTS_MINUTE", default=0),
     )

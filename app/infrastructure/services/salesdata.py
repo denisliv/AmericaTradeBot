@@ -165,6 +165,18 @@ BODY_STYLE_GROUPS = {
     "sedan": lambda style: style.startswith("SEDAN"),
 }
 
+# Критерии ТОП-подборки в рассылке: свежие авто с фиксированной ценой BUY NOW
+TOP_CARS_MIN_YEAR = 2022
+
+
+def is_top_nurture_car(row: dict) -> bool:
+    try:
+        if int(row["Year"]) < TOP_CARS_MIN_YEAR:
+            return False
+    except (KeyError, ValueError):
+        return False
+    return parse_buy_now_price(row) > 0
+
 
 # Случайное актуальное авто заданной группы кузова с HD-фото (для рассылки)
 async def get_random_car_with_images(
@@ -180,6 +192,7 @@ async def get_random_car_with_images(
         for row in rows
         if matcher(row.get("Body Style", "").upper())
         and row.get("Sale Date M/D/CY") != "0"
+        and is_top_nurture_car(row)
     ]
     if not candidates:
         return None

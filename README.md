@@ -1,249 +1,261 @@
 # AmericaTrade Telegram Bot
 
-Telegram-бот для компании AmericaTrade, специализирующейся на подборе и покупке автомобилей из США. Бот предоставляет пользователям возможность подбирать автомобили по различным критериям и подписываться на уведомления о новых лотах.
+Telegram-бот компании AmericaTrade (подбор и доставка автомобилей из США в Беларусь).
+Бот ведёт клиента по сценарию: подбор авто по критериям,
+информационные разделы, захват контакта с отправкой лида в Bitrix24, подписки на
+новые лоты и многошаговая прогревочная рассылка.
 
-## Основные возможности
+## Возможности
 
-- **Подбор автомобилей**: самостоятельный и ассистированный подбор по различным критериям
-- **Подписки**: уведомления о новых автомобилях по выбранным параметрам
-- **Лиды в CRM**: отправка заявок в Bitrix
-- **Административные функции**: пользователи, статистика, модерация, рассылки
-- **Промо-рассылки и контент**: запланированные посты и напоминания (APScheduler)
-- **Данные аукционов**: работа с внешними источниками (в т.ч. Copart)
+**Пользовательская часть** (`/start` → главное меню из 4 кнопок):
+
+- **✅ Подобрать авто из США**
+  - *по марке/модели*: марка → модель → год → статус аукциона → до 10 реальных лотов
+    из CSV Copart (фото, характеристики, предварительная цена BUY NOW) с кнопкой
+    расчёта по каждому авто; «до 2016» и «Другое» (свободный запрос) ведут сразу
+    на консультацию;
+  - *помощь в выборе*: тип кузова → бюджет → ТОП-3 примера из локальной галереи
+    с кнопками расчёта.
+- **🤔 Все об авто из США** — инфо-хаб: 5 разделов (выгода, процесс покупки,
+  аукционы, цена, почему AmericaTrade), в каждом CTA заявки.
+- **⭐ Почему именно AmericaTrade?** — раздел с кнопками отзывов Яндекс/Google.
+- **🙎‍♂️ Помощь и контакты** — логотип, реквизиты, сайт, отзывы.
+- **Заявка (единый флоу)**: CTA → экран «🎯 Отлично!…» → «📞 Отправить мой номер»
+  (reply-кнопка, контакт в одно нажатие) → лид в Bitrix24 → «✅ Контакт получен!».
+  В заголовок лида идёт тип запроса (`Консультация` / `Заявка` / `По рассылке`),
+  в комментарий — выбранные критерии (марка/модель/год, кузов/бюджет, лот, текст запроса).
+- **Подписки** (`/subscription` или «🔔 Следить за вариантами по модели») — до 6
+  подписок на критерии поиска, ежедневная авторассылка новых вариантов.
+
+**Рассылки** (все — через общий безопасный отправитель с лимитами и авточисткой
+заблокировавших):
+
+- **Прогревочная цепочка** (9 шагов от регистрации, состояние в БД):
+  +60 минут и далее ежедневно в 19:00 — контент-посты с картинками, подборки
+  случайного кроссовера (19:00) и седана (21:00) из CSV, приглашения в
+  Telegram/Instagram/TikTok (повторяются каждые 30 дней). Оставленная заявка
+  сдвигает оставшиеся шаги на +3 дня.
+- **Еженедельные посты** — каждое воскресенье в 19:00 по одному посту
+  (картинка + текст-подпись) из `data/posts`, циклично по кругу (12 тем).
+- **Подписочная** — ежедневно (по умолчанию 09:20) новые лоты подписчикам.
+- **Админ-рассылка** — вручную из админки: текст / фото / альбом + кнопка-ссылка,
+  превью, подтверждение, прогресс, per-user статусы доставки.
+
+**Админка** (`/admin`, только для `ADMIN_IDS`): KPI-статистика, создание рассылки,
+бан/разбан по id или @username (shadow-ban — молчаливый игнор).
+
+## Технологический стек
+
+- **Python 3.13+**, зависимости — **[uv](https://docs.astral.sh/uv/)**
+- **aiogram 3.x** — Telegram Bot API (long polling)
+- **PostgreSQL 16** — состояние пользователей, заявки, подписки, прогрев (psycopg 3 + пул)
+- **Redis 7** — FSM-хранилище (db 0) и распределённые локи планировщика (db 1)
+- **APScheduler** — фоновые задачи
+- **Alembic** — миграции схемы (единая init-миграция, применяется автоматически при старте)
+- **Docker / Docker Compose** — деплой полного стека
 
 ## Архитектура проекта
 
 ```
 AmericaTrade/
 ├── app/
-│   ├── bot/                      # Telegram: handlers, middlewares, keyboards, states
+│   ├── bot/                      # Telegram-слой
+│   │   ├── handlers/             # Хендлеры: users, self_selection, assisted_selection,
+│   │   │                         #   consultation_request, subscriptions, admin_mailing, others
+│   │   ├── keyboards/            # Инлайн/reply-клавиатуры
+│   │   ├── middlewares/          # БД, shadow-ban, активность, троттлинг, лимиты действий
+│   │   ├── states/               # FSM-состояния
+│   │   └── scheduler.py          # Задачи APScheduler
 │   ├── infrastructure/
-│   │   ├── database/             # Подключение, запросы (users, selections, admin_mailing)
-│   │   └── services/           # Рассылки, Bitrix, данные аукционов (salesdata)
-│   ├── lexicon/                # Тексты бота
-│   └── config.py                 # Загрузка настроек из переменных окружения
-├── data/                         # Контент и runtime-данные (posts, галерея, CSV)
-├── alembic/                      # Миграции схемы БД (Alembic)
-│   ├── env.py
-│   └── versions/
-├── alembic.ini
-├── tests/                        # Pytest
+│   │   ├── database/             # SQL-запросы (users, selections, nurture, admin_mailing)
+│   │   ├── services/             # nurture, weekly posts, подписочная и админ-рассылки,
+│   │   │                         #   safe_send, salesdata (CSV Copart), bitrix, галерея
+│   │   └── paths.py              # Пути к данным
+│   ├── lexicon/lexicon_ru.py     # ВСЕ тексты и подписи кнопок бота
+│   └── config.py                 # Загрузка настроек из .env
+├── data/                         # Контент и runtime-данные — НЕ в git (см. ниже)
+├── alembic/versions/0001_...py   # Единственная init-миграция (актуальная схема)
+├── scripts/                      # Скрипты проверки рассылок без ожидания расписания
+├── tests/                        # Pytest (~95 тестов: тексты, клавиатуры, расписания, лимиты)
 ├── main.py                       # Точка входа
-├── pyproject.toml / uv.lock      # Зависимости (uv), конфиг ruff
-├── Dockerfile                    # Образ приложения (Python 3.13, uv)
-└── docker-compose.yml            # PostgreSQL 16, Redis 7, бот
+├── Dockerfile / docker-compose.yml
+└── env.example                   # Шаблон .env со всеми переменными
 ```
 
-## Технологический стек
+## Что переносится на сервер ОТДЕЛЬНО (не через GitHub)
 
-- **Python 3.13+**, управление зависимостями — **[uv](https://docs.astral.sh/uv/)**
-- **aiogram 3.x** — Telegram Bot API (long polling)
-- **PostgreSQL** — основная БД (**psycopg** / **psycopg-pool**)
-- **Redis** — FSM storage, отдельная БД для промо-логики
-- **APScheduler** — фоновые задачи и рассылки
-- **Alembic** — версионируемые миграции схемы PostgreSQL
-- **Docker** — контейнер приложения и **Docker Compose** для полного стека (БД + Redis + бот)
+В git хранится только код. Секреты и контент нужно доставить на сервер вручную
+(scp/rsync) при первом развёртывании:
 
-## Требования
+| Что | Куда на сервере | Зачем |
+|---|---|---|
+| `.env` | корень проекта | токены и пароли (шаблон — `env.example`) |
+| `data/logo/logo.jpg` | `data/logo/` | фото в разделе «Помощь и контакты» |
+| `data/warm_up_posts_img/*.png` (4 шт.) | `data/warm_up_posts_img/` | картинки постов прогрева (`why_americatrade`, `top_myths`, `top_suv`, `top_sedan`) |
+| `data/weekly_posts_img/*.png` (12 шт.) | `data/weekly_posts_img/` | картинки еженедельных постов (имена = имена постов) |
+| `data/posts/post_*.txt` (12 шт.) | `data/posts/` | тексты еженедельных постов (≤1024 символов — уходят подписью к фото) |
+| `data/assisted_gallery/**` | `data/assisted_gallery/` | галерея примеров: `<кузов>/<бюджет>/<марка_модель>/*.jpg` (sedan/suv/electric × 6 бюджетов) |
 
-**Локальная разработка**
+`data/salesdata.csv` переносить не обязательно — бот скачивает его сам по расписанию,
+но **первый час после чистого запуска** поиск по CSV будет пустым. Чтобы этого
+избежать, скопируйте свежий `salesdata.csv` в `data/` вместе с остальным контентом.
 
-- Python 3.13+
-- PostgreSQL 12+
-- Redis 6+
-- Telegram Bot Token (и при необходимости вебхук Bitrix)
-- **uv** для установки зависимостей из `pyproject.toml`
-
-**Запуск только в Docker на сервере**
-
-- Установленные **Docker Engine** и плагин **Compose v2** (команда `docker compose`)
-- Ключи и токены в файле **`.env`** (см. `env.example`)
-- Исходящий HTTPS до api.telegram.org и других используемых API
-
-## Установка и настройка (локально, без Docker)
-
-### 1. Клонирование репозитория
+Пример переноса одним архивом:
 
 ```bash
-git clone git@github.com:denisliv/AmericaTradeBot.git
-cd AmericaTrade
+# локально
+tar czf content.tar.gz .env data/
+scp content.tar.gz user@server:~/AmericaTrade/
+# на сервере
+cd ~/AmericaTrade && tar xzf content.tar.gz && rm content.tar.gz
 ```
 
-### 2. Установка uv
+Если какого-то файла контента нет, бот не падает: пишет предупреждение в лог и
+отправляет пост/экран без картинки (или текст «нет примеров» для галереи).
+
+## Переменные окружения
+
+Полный шаблон с комментариями — `env.example`. Ключевые:
+
+| Переменная | Значение |
+|---|---|
+| `BOT_TOKEN` | токен бота от @BotFather |
+| `ADMIN_IDS` | Telegram id админов через запятую (им доступен `/admin`) |
+| `POSTGRES_DB/HOST/PORT/USER/PASSWORD` | доступ к PostgreSQL (для Docker host = `postgres`) |
+| `POSTGRES_POOL_MIN_SIZE/MAX_SIZE` | размер пула соединений (5/20 по умолчанию) |
+| `REDIS_HOST/PORT/USERNAME/PASSWORD` | доступ к Redis (для Docker host = `redis`, пароль пустой) |
+| `REDIS_DATABASE` | БД Redis для FSM (0) |
+| `REDIS_PROMO_DATABASE` | БД Redis для локов планировщика (1) |
+| `COPART_URL` | URL CSV-выгрузки лотов Copart |
+| `BITRIX_WEBHOOK_URL` | вебхук Bitrix24 для лидов (`crm.lead.add`) |
+| `SCHEDULER_TIMEZONE` | таймзона расписаний (по умолчанию `Europe/Moscow`) |
+| `SCHEDULER_CSV_INTERVAL_MINUTES` | период обновления CSV (60) |
+| `SCHEDULER_NEWSLETTER_HOUR/MINUTE` | время подписочной рассылки (09:20) |
+| `SCHEDULER_POSTS_DAY_OF_WEEK/HOUR/MINUTE` | еженедельные посты (`sun` 19:00) |
+| `LOG_LEVEL`, `LOG_FORMAT` | логирование |
+
+Времена прогревочной цепочки заданы константами в
+`app/infrastructure/services/nurture.py` (`SEND_HOUR = 19`, седаны — 21:00).
+
+## Развёртывание на сервере (Docker)
+
+Предполагается Linux-сервер, пользователь в группе `docker`. Для long polling
+входящие подключения не нужны — только исходящий HTTPS.
 
 ```bash
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+# 1. Docker Engine + Compose v2 (см. https://docs.docker.com/engine/install/)
+docker --version && docker compose version
 
-# Linux / macOS
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+# 2. Код
+git clone <URL-репозитория> AmericaTrade && cd AmericaTrade
 
-### 3. Установка зависимостей
+# 3. Секреты и контент (см. раздел «Что переносится отдельно»)
+#    .env + data/ должны оказаться в корне проекта до сборки:
+#    контент data/ попадает внутрь образа при docker compose build
 
-```bash
-uv sync
-```
-
-### 4. Переменные окружения
-
-Скопируйте шаблон и заполните значения:
-
-```bash
-cp env.example .env
-```
-
-Полный перечень переменных и комментарии — в **`env.example`**. Обязательно задайте как минимум:
-
-- `BOT_TOKEN`, `ADMIN_IDS`
-- `POSTGRES_*` (хост, порт, БД, пользователь, пароль). Опционально: `POSTGRES_POOL_MIN_SIZE`, `POSTGRES_POOL_MAX_SIZE` (по умолчанию 5/20)
-- `REDIS_*` (хост, порт; для промо используется отдельный номер БД: `REDIS_PROMO_DATABASE`)
-- `COPART_URL` — источник CSV с данными аукционов
-- опционально: `BITRIX_WEBHOOK_URL`, `LOG_LEVEL`, `LOG_FORMAT`
-- опционально: `SCHEDULER_*` — часовой пояс и расписание фоновых задач (значения по умолчанию — в `env.example`)
-
-### 5. База данных
-
-Создайте базу в PostgreSQL (если её ещё нет):
-
-```sql
-CREATE DATABASE america_trade;
-```
-
-Примените миграции через Alembic:
-
-```bash
-uv run alembic upgrade head
-```
-
-Все DDL управляются Alembic-миграциями в `alembic/versions/`. Runtime-инициализация схемы при старте бота не выполняется.
-
-### 6. Запуск бота
-
-```bash
-uv run python main.py
-```
-
-### 7. Тесты
-
-```bash
-uv sync --dev
-uv run pytest
-```
-
-## Структура базы данных (основное)
-
-Точная схема задаётся миграциями Alembic в `alembic/versions/`. Среди прочего:
-
-- **users** — пользователи бота
-- **self_selection_requests** / **assisted_selection_requests** — заявки подбора
-
-Временная таблица **admin_mailing** создаётся/удаляется в рантайме перед каждой админ-рассылкой (`admin_mailing_prepare_for_broadcast` в `app/infrastructure/database/db.py`).
-
-## Основные компоненты
-
-**Обработчики** (примеры): `users`, `self_selection`, `assisted_selection`, `subscriptions`, `admin`, `admin_mailing`, `consultation_request`, `others`.
-
-**Сервисы**: рассылки, интеграция с Bitrix, загрузка данных и утилиты.
-
-## Команды бота (фрагмент)
-
-- `/start` — приветствие
-- `/help` — справка
-- `/subscription` — подписки
-- Админ-команды — статистика, бан/разбан и др. (см. `ADMIN_IDS` в `.env`)
-
-## Планировщик и фоновые задачи
-
-Используется **APScheduler**: обновление данных (CSV), рассылки подписчикам, промо и связанные задачи (см. `app/bot/scheduler.py` и сервисы рассылок).
-
-### Админ-сводка
-
-В `/admin → Статистика` бот возвращает 4 KPI: всего пользователей, регистрации сегодня, с активной подпиской, среднее число авто на подписку.
-
-## Безопасность и лимиты
-
-В боте применяются middleware для ограничения частоты запросов, теневого бана, учёта активности и ограничений на действия; чувствительные настройки задаются через переменные окружения.
-
-## Логирование
-
-Уровень и формат задаются в `.env` (`LOG_LEVEL`, `LOG_FORMAT`); при старте `main.py` подхватывает `config.config.load_config`.
-
-## Развертывание на сервере в Docker
-
-Ниже предполагается Linux-сервер (например, Ubuntu 22.04/24.04) с правами пользователя, входящего в группу `docker` (или с `sudo` для Docker).
-
-### Шаг 1. Установить Docker и Compose
-
-Официальная инструкция: [Install Docker Engine](https://docs.docker.com/engine/install/). После установки проверьте:
-
-```bash
-docker --version
-docker compose version
-```
-
-### Шаг 2. Получить код на сервер
-
-```bash
-git clone <URL-вашего-репозитория> AmericaTrade
-cd AmericaTrade
-```
-
-### Шаг 3. Настроить `.env`
-
-```bash
-cp env.example .env
-nano .env
-```
-
-Укажите реальные значения:
-
-- **Telegram**: `BOT_TOKEN`, `ADMIN_IDS`
-- **PostgreSQL**: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` — они же используются сервисом `postgres` в `docker-compose.yml` и должны совпадать с тем, что читает приложение
-- **Порты**: `POSTGRES_PORT=5432`, `REDIS_PORT=6379` (внутри сети Compose менять обычно не нужно)
-- **Redis**: для текущего `docker-compose.yml` оставьте **`REDIS_PASSWORD` пустым** (Redis без пароля в приватной сети контейнеров). Номера БД: `REDIS_DATABASE=0`, `REDIS_PROMO_DATABASE=1`
-- **Прочее**: `COPART_URL`, `BITRIX_WEBHOOK_URL` и остальное из `env.example`
-
-Имя хоста БД и Redis для контейнера бота задаётся в `docker-compose.yml` (`POSTGRES_HOST=postgres`, `REDIS_HOST=redis`) и **перекрывает** возможные `localhost` в вашем `.env` — всё равно задайте в `.env` согласованные `POSTGRES_*` и пароль.
-
-### Шаг 4. Собрать образ приложения
-
-```bash
+# 4. Запуск
 docker compose build
-```
-
-### Шаг 5. Запустить стек в фоне
-
-```bash
 docker compose up -d
-```
 
-Миграции Alembic применяются автоматически при старте сервиса `bot`
-(команда `alembic upgrade head && python main.py` в `docker-compose.yml`);
-на актуальной схеме это мгновенный no-op. Убедитесь в логах, что миграции
-применились без ошибок.
-
-Сервисы: **postgres** (том `postgres_data`), **redis** (том `redis_data`, AOF), **bot**.
-
-Порты PostgreSQL и Redis **наружу не пробрасываются** — доступ только между контейнерами. Для Telegram long polling **входящие** подключения к серверу не нужны (нужен исходящий интернет).
-
-### Шаг 6. Проверить логи бота
-
-```bash
+# 5. Проверка
 docker compose logs -f bot
 ```
 
-Остановка и перезапуск:
+Миграции Alembic применяются автоматически при старте сервиса `bot`
+(`alembic upgrade head && python main.py` в `docker-compose.yml`); на актуальной
+схеме это мгновенный no-op. В логах не должно быть ошибок миграций и подключения
+к Postgres/Redis.
 
-```bash
-docker compose down
-docker compose up -d
-```
+Сервисы: **postgres** (том `postgres_data`), **redis** (том `redis_data`, AOF),
+**bot**. Порты БД наружу не пробрасываются.
 
-Обновление версии кода:
+**Обновление версии кода:**
 
 ```bash
 git pull
-docker compose build
-docker compose up -d   # новые миграции применятся автоматически при старте
+docker compose build     # контент data/ и .env не трогаются, но попадают в новый образ
+docker compose up -d     # новые миграции применятся автоматически
 ```
+
+**Обновление контента** (посты, картинки): скопируйте новые файлы в `data/` и
+пересоберите образ (`docker compose build && docker compose up -d`) — контент
+запекается в образ при сборке.
+
+## Локальная разработка (без Docker)
+
+Нужны: Python 3.13+, PostgreSQL, Redis, uv.
+
+```bash
+uv sync --dev                      # зависимости
+cp env.example .env                # заполнить токены/пароли (host = localhost)
+# создать БД: CREATE DATABASE america_trade;
+uv run alembic upgrade head        # миграции
+uv run python main.py              # запуск
+uv run pytest                      # тесты
+uv run ruff check app tests scripts   # линтер
+```
+
+## Проверка рассылок без ожидания расписания
+
+Скрипты шлют сообщения напрямую и не конфликтуют с работающим ботом
+(получатель должен хотя бы раз нажать `/start`):
+
+```bash
+# Прогревочная цепочка: все 9 шагов или выборочно
+docker compose exec bot python scripts/preview_nurture.py <telegram_user_id>
+docker compose exec bot python scripts/preview_nurture.py <telegram_user_id> --steps 4,5
+
+# Шаги: 1 — почему AT, 2 — мифы, 3 — история клиента, 4 — ТОП кроссоверов (19:00),
+# 5 — ТОП седанов (21:00), 6 — «пока вы думаете», 7-9 — Telegram/Instagram/TikTok
+
+# Еженедельные посты: все 12 / выборочно / пост текущей недели
+docker compose exec bot python scripts/preview_weekly_posts.py <telegram_user_id>
+docker compose exec bot python scripts/preview_weekly_posts.py <telegram_user_id> --posts 3,5
+docker compose exec bot python scripts/preview_weekly_posts.py <telegram_user_id> --current
+```
+
+Проверка расписания прогрева end-to-end — «машина времени» (после этого
+планировщик шлёт по одному назревшему шагу каждые 10 минут):
+
+```bash
+docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB -c \
+  "UPDATE nurture_state SET started_at = NOW() - interval '50 days', last_step = 0 WHERE user_id = <id>;"
+```
+
+Сдвиг после заявки: оставить заявку в боте и убедиться, что
+`SELECT shift_days FROM nurture_state WHERE user_id = <id>;` вернул 3.
+
+Локально (без Docker) те же скрипты запускаются как
+`uv run python scripts/preview_nurture.py …`.
+
+## Фоновые задачи (APScheduler)
+
+| Задача | Расписание | Что делает |
+|---|---|---|
+| `download_csv` | каждые 60 мин | скачивает и валидирует CSV Copart, обновляет кэш |
+| `nurture_chain` | каждые 10 мин | шлёт назревшие шаги прогрева (≤1 шаг на пользователя за прогон) |
+| `daily_newsletter` | ежедневно 09:20 | новые лоты подписчикам |
+| `weekly_posts_broadcast` | вс 19:00 | еженедельный пост с картинкой всем живым пользователям |
+
+Все задачи выполняются под Redis-локами — безопасно при нескольких инстансах.
+
+## База данных
+
+Схема — в единственной миграции `alembic/versions/0001_initial_schema.py`:
+
+- **users** — пользователи (роль, is_alive, banned, счётчик подписок)
+- **self_selection_requests** — поиски по марке/модели (+ флаг подписки)
+- **assisted_selection_requests** — запросы «помощь в выборе»
+- **nurture_state** — состояние прогревочной цепочки (старт, сдвиг, последний шаг)
+
+Временная таблица **admin_mailing** создаётся и удаляется в рантайме на время
+каждой админ-рассылки (per-user статусы доставки).
+
+## Лимиты и защита
+
+- Кулдаун сообщений 2 сек (предупреждение один раз за окно), админы исключены.
+- 100 «тяжёлых» действий в час на пользователя (входы в подбор, «Подобрать еще»).
+- Подписки: максимум 6 на пользователя, атомарно (`FOR UPDATE`).
+- Исходящий темп рассылок 5–20 сообщений/сек с обработкой flood-limit;
+  заблокировавшие бота автоматически помечаются `is_alive=false` во всех рассылках.
+- Shadow-ban: забаненные пользователи молча игнорируются.

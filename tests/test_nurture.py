@@ -6,10 +6,16 @@ from zoneinfo import ZoneInfo
 from app.infrastructure.services.nurture import (
     FIRST_STEP_DELAY,
     STEP_OFFSET_DAYS,
+    TOP_CARS_IMG,
+    TOP_MYTHS_IMG,
+    WHY_AMERICATRADE_IMG,
     due_at,
     resolve_step,
 )
-from app.infrastructure.services.salesdata import BODY_STYLE_GROUPS
+from app.infrastructure.services.salesdata import (
+    BODY_STYLE_GROUPS,
+    is_top_nurture_car,
+)
 from app.lexicon.lexicon_ru import LEXICON_NURTURE_RU
 
 _TZ = ZoneInfo("Europe/Minsk")
@@ -17,8 +23,9 @@ _START = datetime(2026, 7, 1, 9, 30, tzinfo=_TZ)
 
 
 def test_step_offsets_are_daily():
-    # После поста через 60 минут - по посту каждый день начиная от регистрации
-    assert STEP_OFFSET_DAYS == {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7}
+    # После поста через 60 минут - по посту каждый день; подборки
+    # кроссоверов (4) и седанов (5) - в один день
+    assert STEP_OFFSET_DAYS == {2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 5, 8: 6, 9: 7}
 
 
 def test_first_step_is_60_minutes_after_start():
@@ -26,12 +33,20 @@ def test_first_step_is_60_minutes_after_start():
     assert due_at(_START, 0, 1, _TZ) == _START + timedelta(minutes=60)
 
 
-def test_daily_steps_sent_at_noon():
+def test_daily_steps_sent_at_evening():
     due = due_at(_START, 0, 2, _TZ)
-    assert due == datetime(2026, 7, 2, 12, 0, tzinfo=_TZ)
+    assert due == datetime(2026, 7, 2, 19, 0, tzinfo=_TZ)
 
-    due = due_at(_START, 0, 8, _TZ)
-    assert due == datetime(2026, 7, 8, 12, 0, tzinfo=_TZ)
+    due = due_at(_START, 0, 9, _TZ)
+    assert due == datetime(2026, 7, 8, 19, 0, tzinfo=_TZ)
+
+
+def test_top_cars_split_between_evening_hours():
+    # Кроссоверы в 19:00, седаны в 21:00 того же дня
+    suv_due = due_at(_START, 0, 4, _TZ)
+    sedan_due = due_at(_START, 0, 5, _TZ)
+    assert suv_due == datetime(2026, 7, 4, 19, 0, tzinfo=_TZ)
+    assert sedan_due == datetime(2026, 7, 4, 21, 0, tzinfo=_TZ)
 
 
 def test_application_shifts_remaining_steps_by_three_days():
@@ -44,16 +59,16 @@ def test_application_shifts_remaining_steps_by_three_days():
 
 
 def test_social_steps_repeat_monthly():
-    # После шага 8 цепочка продолжается повторами шагов 6-8 каждые 30 дней
-    assert resolve_step(8) == (9, 6)
+    # После шага 9 цепочка продолжается повторами шагов 7-9 каждые 30 дней
     assert resolve_step(9) == (10, 7)
     assert resolve_step(10) == (11, 8)
-    assert resolve_step(11) == (12, 6)
-    assert resolve_step(14) == (15, 6)
+    assert resolve_step(11) == (12, 9)
+    assert resolve_step(12) == (13, 7)
+    assert resolve_step(15) == (16, 7)
 
-    telegram_first = due_at(_START, 0, 6, _TZ)
-    telegram_repeat_1 = due_at(_START, 0, 9, _TZ)
-    telegram_repeat_2 = due_at(_START, 0, 12, _TZ)
+    telegram_first = due_at(_START, 0, 7, _TZ)
+    telegram_repeat_1 = due_at(_START, 0, 10, _TZ)
+    telegram_repeat_2 = due_at(_START, 0, 13, _TZ)
     assert telegram_repeat_1 - telegram_first == timedelta(days=30)
     assert telegram_repeat_2 - telegram_repeat_1 == timedelta(days=30)
 
@@ -61,7 +76,7 @@ def test_social_steps_repeat_monthly():
 def test_base_steps_resolve_in_order():
     assert resolve_step(0) == (1, 1)
     assert resolve_step(1) == (2, 2)
-    assert resolve_step(7) == (8, 8)
+    assert resolve_step(8) == (9, 9)
 
 
 def test_nurture_texts_match_diagram_headers():
@@ -80,6 +95,34 @@ def test_nurture_texts_match_diagram_headers():
     assert LEXICON_NURTURE_RU["go_telegram_button"] == "Перейти в Telegram-канал"
     assert LEXICON_NURTURE_RU["go_instagram_button"] == "Перейти в Instagram"
     assert LEXICON_NURTURE_RU["go_tiktok_button"] == "Перейти в TikTok"
+
+
+def test_warm_up_post_images_are_expected_files():
+    # Картинки постов лежат в data/warm_up_posts_img с латинскими именами
+    assert WHY_AMERICATRADE_IMG.name == "why_americatrade.png"
+    assert TOP_MYTHS_IMG.name == "top_myths.png"
+    assert TOP_CARS_IMG["suv"][0].name == "top_suv.png"
+    assert TOP_CARS_IMG["sedan"][0].name == "top_sedan.png"
+    assert all(
+        path.parent.name == "warm_up_posts_img"
+        for path in (
+            WHY_AMERICATRADE_IMG,
+            TOP_MYTHS_IMG,
+            TOP_CARS_IMG["suv"][0],
+            TOP_CARS_IMG["sedan"][0],
+        )
+    )
+
+
+def test_top_nurture_car_requires_fresh_year_and_buy_now():
+    # В ТОП-подборку рассылки попадают авто от 2022 года с ценой BUY NOW
+    assert is_top_nurture_car({"Year": "2022", "Buy-It-Now Price": "15000"})
+    assert is_top_nurture_car({"Year": "2024", "Buy-It-Now Price": "8500.0"})
+
+    assert not is_top_nurture_car({"Year": "2021", "Buy-It-Now Price": "15000"})
+    assert not is_top_nurture_car({"Year": "2023", "Buy-It-Now Price": "0"})
+    assert not is_top_nurture_car({"Year": "2023", "Buy-It-Now Price": ""})
+    assert not is_top_nurture_car({"Year": "", "Buy-It-Now Price": "15000"})
 
 
 def test_body_style_groups_classify_csv_values():
