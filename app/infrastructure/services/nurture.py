@@ -1,9 +1,8 @@
 """Прогревочная цепочка рассылок (по диаграмме Miro).
 
 График от регистрации пользователя (при оставленной заявке сдвигается на +3 дня):
-шаг 1 - через 60 минут, далее по посту каждый день (дни 1-7) в 19:00 по таймзоне
-бота; подборки дня 3 разнесены: кроссоверы в 19:00, седаны в 21:00.
-Шаги 7-9 (Telegram/Instagram/TikTok) повторяются каждые 30 дней бессрочно.
+шаг 1 - через 60 минут, далее по посту каждый день (дни 1-7) в 19:00 по таймзоне бота.
+Шаги 6-8 (Telegram/Instagram/TikTok) повторяются каждые 30 дней бессрочно.
 """
 
 import asyncio
@@ -44,16 +43,18 @@ TOP_CARS_IMG = {
     "suv": (WARM_UP_POSTS_IMG_DIR / "top_suv.png", "кроссоверов"),
     "sedan": (WARM_UP_POSTS_IMG_DIR / "top_sedan.png", "седанов"),
 }
+THINKING_IMG = WARM_UP_POSTS_IMG_DIR / "thinking.png"
+JOIN_TELEGRAM_IMG = WARM_UP_POSTS_IMG_DIR / "join_telegram.png"
+JOIN_INSTAGRAM_IMG = WARM_UP_POSTS_IMG_DIR / "join_instagram.png"
+JOIN_TIKTOK_IMG = WARM_UP_POSTS_IMG_DIR / "join_tiktok.png"
 
-# День отправки шага (от старта цепочки); шаг 1 - через 60 минут.
-# Шаги 4 и 5 - подборки кроссоверов и седанов в один день, но в разное время
-STEP_OFFSET_DAYS = {2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 5, 8: 6, 9: 7}
+# День отправки шага (от старта цепочки); шаг 1 - через 60 минут
+STEP_OFFSET_DAYS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7}
 FIRST_STEP_DELAY = timedelta(minutes=60)
 SEND_HOUR = 19
-STEP_SEND_HOUR = {5: 21}  # седаны уходят позже кроссоверов
 MONTHLY_REPEAT_DAYS = 30
-_SOCIAL_STEPS = (7, 8, 9)
-_LAST_BASE_STEP = 9
+_SOCIAL_STEPS = (6, 7, 8)
+_LAST_BASE_STEP = 8
 
 TELEGRAM_CHANNEL_URL = "https://t.me/americatradeby"
 INSTAGRAM_URL = "https://www.instagram.com/americatrade.by"
@@ -61,10 +62,10 @@ TIKTOK_URL = "https://www.tiktok.com/@americatrade"
 
 
 def resolve_step(last_step: int) -> tuple[int, int]:
-    """Возвращает (следующий шаг цепочки, контентный шаг 1..9).
+    """Возвращает (следующий шаг цепочки, контентный шаг 1..8).
 
-    После шага 9 цепочка продолжается месячными повторами шагов 7-9:
-    10 = повтор шага 7, 11 = повтор шага 8, 12 = повтор шага 9, 13 = шаг 7 и т.д.
+    После шага 8 цепочка продолжается месячными повторами шагов 6-8:
+    9 = повтор шага 6, 10 = повтор шага 7, 11 = повтор шага 8, 12 = шаг 6 и т.д.
     """
     next_step = last_step + 1
     if next_step <= _LAST_BASE_STEP:
@@ -85,15 +86,13 @@ def due_at(
 
     if step <= _LAST_BASE_STEP:
         offset_days = STEP_OFFSET_DAYS[step]
-        hour = STEP_SEND_HOUR.get(step, SEND_HOUR)
     else:
         content_step = _SOCIAL_STEPS[(step - _LAST_BASE_STEP - 1) % 3]
         cycle = (step - _LAST_BASE_STEP - 1) // 3 + 1
         offset_days = STEP_OFFSET_DAYS[content_step] + MONTHLY_REPEAT_DAYS * cycle
-        hour = SEND_HOUR
 
     return (base + timedelta(days=offset_days)).replace(
-        hour=hour, minute=0, second=0, microsecond=0
+        hour=SEND_HOUR, minute=0, second=0, microsecond=0
     )
 
 
@@ -131,12 +130,6 @@ async def _send_photo_post(
     else:
         logger.warning("Nurture post image not found: %s", image)
         await bot.send_message(chat_id=user_id, text=text, reply_markup=reply_markup)
-
-
-async def _send_text_step(bot: Bot, user_id: int, text: str) -> None:
-    await bot.send_message(
-        chat_id=user_id, text=text, reply_markup=_consultation_keyboard()
-    )
 
 
 async def _send_top_car_post(
@@ -204,33 +197,43 @@ async def send_nurture_step(
             reply_markup=_consultation_keyboard(),
         )
     elif content_step == 3:
-        await _send_text_step(bot, user_id, LEXICON_NURTURE_RU["client_story_text"])
-    elif content_step == 4:
         await _send_top_car_post(bot, user_id, first_name, "suv")
-    elif content_step == 5:
+    elif content_step == 4:
         await _send_top_car_post(bot, user_id, first_name, "sedan")
+    elif content_step == 5:
+        await _send_photo_post(
+            bot,
+            user_id,
+            THINKING_IMG,
+            LEXICON_NURTURE_RU["thinking_text"],
+            reply_markup=_consultation_keyboard(),
+        )
     elif content_step == 6:
-        await _send_text_step(bot, user_id, LEXICON_NURTURE_RU["thinking_text"])
-    elif content_step == 7:
-        await bot.send_message(
-            chat_id=user_id,
-            text=LEXICON_NURTURE_RU["telegram_text"],
+        await _send_photo_post(
+            bot,
+            user_id,
+            JOIN_TELEGRAM_IMG,
+            LEXICON_NURTURE_RU["telegram_text"],
             reply_markup=_url_keyboard(
                 LEXICON_NURTURE_RU["go_telegram_button"], TELEGRAM_CHANNEL_URL
             ),
         )
-    elif content_step == 8:
-        await bot.send_message(
-            chat_id=user_id,
-            text=LEXICON_NURTURE_RU["instagram_text"],
+    elif content_step == 7:
+        await _send_photo_post(
+            bot,
+            user_id,
+            JOIN_INSTAGRAM_IMG,
+            LEXICON_NURTURE_RU["instagram_text"],
             reply_markup=_url_keyboard(
                 LEXICON_NURTURE_RU["go_instagram_button"], INSTAGRAM_URL
             ),
         )
-    elif content_step == 9:
-        await bot.send_message(
-            chat_id=user_id,
-            text=LEXICON_NURTURE_RU["tiktok_text"],
+    elif content_step == 8:
+        await _send_photo_post(
+            bot,
+            user_id,
+            JOIN_TIKTOK_IMG,
+            LEXICON_NURTURE_RU["tiktok_text"],
             reply_markup=_url_keyboard(
                 LEXICON_NURTURE_RU["go_tiktok_button"], TIKTOK_URL
             ),

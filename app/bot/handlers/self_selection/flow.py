@@ -155,7 +155,13 @@ async def process_year_button_press(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         text="Какие варианты хотели бы увидеть?",
         reply_markup=create_choice_keyboard(
-            *LEXICON_FORM_BUTTONS_RU["auction_status_buttons"], width=1
+            *(
+                (callback_data, text_key, ButtonStyle.PRIMARY)
+                for callback_data, text_key in LEXICON_FORM_BUTTONS_RU[
+                    "auction_status_buttons"
+                ]
+            ),
+            width=1,
         ),
     )
     await callback.answer()

@@ -5,7 +5,11 @@ from zoneinfo import ZoneInfo
 
 from app.infrastructure.services.nurture import (
     FIRST_STEP_DELAY,
+    JOIN_INSTAGRAM_IMG,
+    JOIN_TELEGRAM_IMG,
+    JOIN_TIKTOK_IMG,
     STEP_OFFSET_DAYS,
+    THINKING_IMG,
     TOP_CARS_IMG,
     TOP_MYTHS_IMG,
     WHY_AMERICATRADE_IMG,
@@ -23,9 +27,8 @@ _START = datetime(2026, 7, 1, 9, 30, tzinfo=_TZ)
 
 
 def test_step_offsets_are_daily():
-    # После поста через 60 минут - по посту каждый день; подборки
-    # кроссоверов (4) и седанов (5) - в один день
-    assert STEP_OFFSET_DAYS == {2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 5, 8: 6, 9: 7}
+    # После поста через 60 минут - по посту каждый день (дни 1-7)
+    assert STEP_OFFSET_DAYS == {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7}
 
 
 def test_first_step_is_60_minutes_after_start():
@@ -34,19 +37,11 @@ def test_first_step_is_60_minutes_after_start():
 
 
 def test_daily_steps_sent_at_evening():
-    due = due_at(_START, 0, 2, _TZ)
-    assert due == datetime(2026, 7, 2, 19, 0, tzinfo=_TZ)
-
-    due = due_at(_START, 0, 9, _TZ)
-    assert due == datetime(2026, 7, 8, 19, 0, tzinfo=_TZ)
-
-
-def test_top_cars_split_between_evening_hours():
-    # Кроссоверы в 19:00, седаны в 21:00 того же дня
-    suv_due = due_at(_START, 0, 4, _TZ)
-    sedan_due = due_at(_START, 0, 5, _TZ)
-    assert suv_due == datetime(2026, 7, 4, 19, 0, tzinfo=_TZ)
-    assert sedan_due == datetime(2026, 7, 4, 21, 0, tzinfo=_TZ)
+    # Все дневные шаги уходят в 19:00: кроссоверы - день 2, седаны - день 3
+    assert due_at(_START, 0, 2, _TZ) == datetime(2026, 7, 2, 19, 0, tzinfo=_TZ)
+    assert due_at(_START, 0, 3, _TZ) == datetime(2026, 7, 3, 19, 0, tzinfo=_TZ)
+    assert due_at(_START, 0, 4, _TZ) == datetime(2026, 7, 4, 19, 0, tzinfo=_TZ)
+    assert due_at(_START, 0, 8, _TZ) == datetime(2026, 7, 8, 19, 0, tzinfo=_TZ)
 
 
 def test_application_shifts_remaining_steps_by_three_days():
@@ -59,16 +54,16 @@ def test_application_shifts_remaining_steps_by_three_days():
 
 
 def test_social_steps_repeat_monthly():
-    # После шага 9 цепочка продолжается повторами шагов 7-9 каждые 30 дней
+    # После шага 8 цепочка продолжается повторами шагов 6-8 каждые 30 дней
+    assert resolve_step(8) == (9, 6)
     assert resolve_step(9) == (10, 7)
     assert resolve_step(10) == (11, 8)
-    assert resolve_step(11) == (12, 9)
-    assert resolve_step(12) == (13, 7)
-    assert resolve_step(15) == (16, 7)
+    assert resolve_step(11) == (12, 6)
+    assert resolve_step(14) == (15, 6)
 
-    telegram_first = due_at(_START, 0, 7, _TZ)
-    telegram_repeat_1 = due_at(_START, 0, 10, _TZ)
-    telegram_repeat_2 = due_at(_START, 0, 13, _TZ)
+    telegram_first = due_at(_START, 0, 6, _TZ)
+    telegram_repeat_1 = due_at(_START, 0, 9, _TZ)
+    telegram_repeat_2 = due_at(_START, 0, 12, _TZ)
     assert telegram_repeat_1 - telegram_first == timedelta(days=30)
     assert telegram_repeat_2 - telegram_repeat_1 == timedelta(days=30)
 
@@ -76,15 +71,12 @@ def test_social_steps_repeat_monthly():
 def test_base_steps_resolve_in_order():
     assert resolve_step(0) == (1, 1)
     assert resolve_step(1) == (2, 2)
-    assert resolve_step(8) == (9, 9)
+    assert resolve_step(7) == (8, 8)
 
 
 def test_nurture_texts_match_diagram_headers():
     assert LEXICON_NURTURE_RU["myths_text"].startswith(
         "<b>🤔  ТОП 3 мифа об авто из США</b>"
-    )
-    assert LEXICON_NURTURE_RU["client_story_text"].startswith(
-        "<b>🙋 XXX за X $ - реальная история нашего клиента</b>"
     )
     assert LEXICON_NURTURE_RU["thinking_text"].startswith(
         "<b>🔥 Пока вы думаете - аукционы проходят каждый день</b>"
@@ -103,6 +95,10 @@ def test_warm_up_post_images_are_expected_files():
     assert TOP_MYTHS_IMG.name == "top_myths.png"
     assert TOP_CARS_IMG["suv"][0].name == "top_suv.png"
     assert TOP_CARS_IMG["sedan"][0].name == "top_sedan.png"
+    assert THINKING_IMG.name == "thinking.png"
+    assert JOIN_TELEGRAM_IMG.name == "join_telegram.png"
+    assert JOIN_INSTAGRAM_IMG.name == "join_instagram.png"
+    assert JOIN_TIKTOK_IMG.name == "join_tiktok.png"
     assert all(
         path.parent.name == "warm_up_posts_img"
         for path in (
@@ -110,6 +106,10 @@ def test_warm_up_post_images_are_expected_files():
             TOP_MYTHS_IMG,
             TOP_CARS_IMG["suv"][0],
             TOP_CARS_IMG["sedan"][0],
+            THINKING_IMG,
+            JOIN_TELEGRAM_IMG,
+            JOIN_INSTAGRAM_IMG,
+            JOIN_TIKTOK_IMG,
         )
     )
 

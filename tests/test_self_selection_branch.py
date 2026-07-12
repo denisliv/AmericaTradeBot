@@ -1,6 +1,9 @@
 """Branch "🚗 Да, указать марку и модель" must match the Miro diagram."""
 
+from aiogram.enums import ButtonStyle
+
 from app.bot.keyboards.keyboards_inline import (
+    create_choice_keyboard,
     create_self_lead_keyboard,
     create_self_results_keyboard,
 )
@@ -60,6 +63,24 @@ def test_old_year_lead_text_matches_diagram():
         "проконсультировать по всем нюансам.\r\n\n"
         "Оставьте ваш номер телефона для бесплатной консультации."
     )
+
+
+def test_auction_status_buttons_are_blue():
+    keyboard = create_choice_keyboard(
+        *(
+            (callback_data, text_key, ButtonStyle.PRIMARY)
+            for callback_data, text_key in LEXICON_FORM_BUTTONS_RU[
+                "auction_status_buttons"
+            ]
+        ),
+        width=1,
+    )
+    buttons = [button for row in keyboard.inline_keyboard for button in row]
+    assert [(button.text, button.callback_data) for button in buttons] == [
+        ("Фиксированная цена КУПИТЬ СЕЙЧАС 🔥", "Только BUY NOW"),
+        ("Все варианты", "Все варианты"),
+    ]
+    assert all(button.style == ButtonStyle.PRIMARY for button in buttons)
 
 
 def test_self_results_keyboard_matches_diagram():

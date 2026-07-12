@@ -30,9 +30,9 @@ Telegram-бот компании AmericaTrade (подбор и доставка 
 **Рассылки** (все — через общий безопасный отправитель с лимитами и авточисткой
 заблокировавших):
 
-- **Прогревочная цепочка** (9 шагов от регистрации, состояние в БД):
+- **Прогревочная цепочка** (8 шагов от регистрации, состояние в БД):
   +60 минут и далее ежедневно в 19:00 — контент-посты с картинками, подборки
-  случайного кроссовера (19:00) и седана (21:00) из CSV, приглашения в
+  случайного кроссовера и седана из CSV, приглашения в
   Telegram/Instagram/TikTok (повторяются каждые 30 дней). Оставленная заявка
   сдвигает оставшиеся шаги на +3 дня.
 - **Еженедельные посты** — каждое воскресенье в 19:00 по одному посту
@@ -91,9 +91,10 @@ AmericaTrade/
 |---|---|---|
 | `.env` | корень проекта | токены и пароли (шаблон — `env.example`) |
 | `data/logo/logo.jpg` | `data/logo/` | фото в разделе «Помощь и контакты» |
-| `data/warm_up_posts_img/*.png` (4 шт.) | `data/warm_up_posts_img/` | картинки постов прогрева (`why_americatrade`, `top_myths`, `top_suv`, `top_sedan`) |
+| `data/warm_up_posts_img/*.png` (8 шт.) | `data/warm_up_posts_img/` | картинки постов прогрева (`why_americatrade`, `top_myths`, `top_suv`, `top_sedan`, `thinking`, `join_telegram`, `join_instagram`, `join_tiktok`) |
 | `data/weekly_posts_img/*.png` (12 шт.) | `data/weekly_posts_img/` | картинки еженедельных постов (имена = имена постов) |
 | `data/posts/post_*.txt` (12 шт.) | `data/posts/` | тексты еженедельных постов (≤1024 символов — уходят подписью к фото) |
+| `data/about_america_trade/*.png` (6 шт.) | `data/about_america_trade/` | картинки хаба «Все об авто из США» (`hub`, `why_profitable`, `purchasing_process`, `auctions`, `price_breakdown`, `why_americatrade`) |
 | `data/assisted_gallery/**` | `data/assisted_gallery/` | галерея примеров: `<кузов>/<бюджет>/<марка_модель>/*.jpg` (sedan/suv/electric × 6 бюджетов) |
 
 `data/salesdata.csv` переносить не обязательно — бот скачивает его сам по расписанию,
@@ -134,8 +135,8 @@ cd ~/AmericaTrade && tar xzf content.tar.gz && rm content.tar.gz
 | `SCHEDULER_POSTS_DAY_OF_WEEK/HOUR/MINUTE` | еженедельные посты (`sun` 19:00) |
 | `LOG_LEVEL`, `LOG_FORMAT` | логирование |
 
-Времена прогревочной цепочки заданы константами в
-`app/infrastructure/services/nurture.py` (`SEND_HOUR = 19`, седаны — 21:00).
+Время прогревочной цепочки задано константой в
+`app/infrastructure/services/nurture.py` (`SEND_HOUR = 19`).
 
 ## Развёртывание на сервере (Docker)
 
@@ -201,12 +202,12 @@ uv run ruff check app tests scripts   # линтер
 (получатель должен хотя бы раз нажать `/start`):
 
 ```bash
-# Прогревочная цепочка: все 9 шагов или выборочно
+# Прогревочная цепочка: все 8 шагов или выборочно
 docker compose exec bot python scripts/preview_nurture.py <telegram_user_id>
-docker compose exec bot python scripts/preview_nurture.py <telegram_user_id> --steps 4,5
+docker compose exec bot python scripts/preview_nurture.py <telegram_user_id> --steps 3,4
 
-# Шаги: 1 — почему AT, 2 — мифы, 3 — история клиента, 4 — ТОП кроссоверов (19:00),
-# 5 — ТОП седанов (21:00), 6 — «пока вы думаете», 7-9 — Telegram/Instagram/TikTok
+# Шаги: 1 — почему AT, 2 — мифы, 3 — ТОП кроссоверов, 4 — ТОП седанов,
+# 5 — «пока вы думаете», 6-8 — Telegram/Instagram/TikTok
 
 # Еженедельные посты: все 12 / выборочно / пост текущей недели
 docker compose exec bot python scripts/preview_weekly_posts.py <telegram_user_id>

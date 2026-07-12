@@ -2,7 +2,12 @@
 
 from aiogram.enums import ButtonStyle
 
-from app.bot.handlers.users import create_info_hub_keyboard
+from app.bot.handlers.users import (
+    _INFO_SECTIONS,
+    INFO_HUB_IMG,
+    WHY_AMERICATRADE_IMG,
+    create_info_hub_keyboard,
+)
 from app.bot.keyboards.keyboards_inline import (
     REVIEWS_GOOGLE_URL,
     REVIEWS_YANDEX_URL,
@@ -68,7 +73,7 @@ def test_contacts_keyboard_matches_diagram():
         "Наш сайт",
         "⭐ Отзывы Яндекс",
         "⭐ Отзывы Google",
-        "✅ Оставить заявку на бесплатную консультацию",
+        "✅ Получить бесплатную консультацию",
         "🔙 Назад",
     ]
     assert [button.url for button in buttons[:3]] == [
@@ -111,6 +116,30 @@ def test_info_hub_keyboard_matches_diagram():
     assert buttons[4].callback_data == "why_americatrade_from_hub"
 
 
+def test_info_hub_images_are_expected_files():
+    # Картинки хаба лежат в data/about_america_trade с латинскими именами
+    assert INFO_HUB_IMG.name == "hub.png"
+    assert WHY_AMERICATRADE_IMG.name == "why_americatrade.png"
+    assert _INFO_SECTIONS["why_profitable_button"][1].name == "why_profitable.png"
+    assert _INFO_SECTIONS["purchasing_process_button"][1].name == "purchasing_process.png"
+    assert _INFO_SECTIONS["auctions_button"][1].name == "auctions.png"
+    assert _INFO_SECTIONS["price_breakdown_button"][1].name == "price_breakdown.png"
+    images = [INFO_HUB_IMG, WHY_AMERICATRADE_IMG] + [
+        image for _, image in _INFO_SECTIONS.values()
+    ]
+    assert all(image.parent.name == "about_america_trade" for image in images)
+
+
+def test_info_section_captions_fit_photo_caption_limit():
+    # Тексты разделов уходят подписью к фото: лимит Telegram 1024 UTF-16 единицы
+    import re
+
+    for text_key, _ in _INFO_SECTIONS.values():
+        plain = re.sub(r"<[^>]+>", "", LEXICON_RU[text_key])
+        units = len(plain.encode("utf-16-le")) // 2
+        assert units <= 1024, f"{text_key}: {units} единиц"
+
+
 def test_info_sections_have_diagram_headers():
     # Каждый раздел хаба начинается с заголовка из диаграммы
     expected_headers = {
@@ -137,7 +166,7 @@ def test_why_americatrade_keyboard_matches_diagram():
     buttons = [button for row in keyboard.inline_keyboard for button in row]
 
     assert [button.text for button in buttons] == [
-        "✅ Оставить заявку на бесплатную консультацию",
+        "✅ Получить бесплатную консультацию",
         "⭐ Посмотреть отзывы в Яндекс",
         "⭐ Посмотреть отзывы в Google",
         "В меню",
@@ -208,7 +237,7 @@ def test_info_section_keyboard_has_consultation_back_and_menu():
     buttons = [button for row in keyboard.inline_keyboard for button in row]
     assert [(button.text, button.callback_data) for button in buttons] == [
         (
-            "✅ Оставить заявку на бесплатную консультацию",
+            "✅ Получить бесплатную консультацию",
             "application_for_selection_button",
         ),
         ("🔙 Назад", "back_to:info_hub"),

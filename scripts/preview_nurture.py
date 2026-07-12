@@ -30,15 +30,15 @@ from app.infrastructure.services.nurture import send_nurture_step  # noqa: E402
 
 
 def parse_steps(raw: str) -> list[int]:
-    """"1-9" или "1,3,5" -> список номеров шагов."""
+    """"1-8" или "1,3,5" -> список номеров шагов."""
     if "-" in raw:
         start, end = raw.split("-", 1)
         steps = list(range(int(start), int(end) + 1))
     else:
         steps = [int(part) for part in raw.split(",")]
     for step in steps:
-        if not 1 <= step <= 9:
-            raise ValueError(f"Шаг {step} вне диапазона 1-9")
+        if not 1 <= step <= 8:
+            raise ValueError(f"Шаг {step} вне диапазона 1-8")
     return steps
 
 
@@ -49,8 +49,8 @@ async def main() -> None:
     parser.add_argument("user_id", type=int, help="Telegram user_id получателя")
     parser.add_argument(
         "--steps",
-        default="1-9",
-        help='Шаги: "1-9" (по умолчанию) или перечисление "1,2,4"',
+        default="1-8",
+        help='Шаги: "1-8" (по умолчанию) или перечисление "1,2,4"',
     )
     parser.add_argument(
         "--name", default="Тест", help="Имя, подставляемое в тексты постов"

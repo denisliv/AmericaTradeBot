@@ -9,6 +9,8 @@ from aiogram.types import (
     CallbackQuery,
     ChatMemberUpdated,
     FSInputFile,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
     Message,
 )
 from psycopg.connection_async import AsyncConnection
@@ -26,8 +28,12 @@ from app.infrastructure.database.users import (
     change_user_alive_status,
     get_user,
 )
-from app.infrastructure.paths import LOGO_JPG
+from app.infrastructure.paths import ABOUT_AMERICA_TRADE_IMG_DIR, LOGO_JPG
 from app.lexicon.lexicon_ru import LEXICON_RU
+
+# Картинки хаба "Все об авто из США"; текст экрана идет подписью под картинкой
+INFO_HUB_IMG = ABOUT_AMERICA_TRADE_IMG_DIR / "hub.png"
+WHY_AMERICATRADE_IMG = ABOUT_AMERICA_TRADE_IMG_DIR / "why_americatrade.png"
 
 logger = logging.getLogger(__name__)
 
@@ -134,22 +140,77 @@ def create_info_hub_keyboard():
     )
 
 
+async def _show_photo_screen(
+    callback: CallbackQuery,
+    image,
+    caption: str,
+    keyboard: InlineKeyboardMarkup,
+) -> None:
+    """Экран "картинка + текст-подпись": фото-сообщения редактируются на месте.
+
+    Без картинки (runtime-файл может отсутствовать) экран показывается текстом.
+    """
+    if image.exists():
+        if callback.message.photo:
+            await callback.message.edit_media(
+                media=InputMediaPhoto(media=FSInputFile(image), caption=caption),
+                reply_markup=keyboard,
+            )
+        else:
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=FSInputFile(image), caption=caption, reply_markup=keyboard
+            )
+        return
+
+    logger.warning("Info hub image not found: %s", image)
+    await _show_text_screen(callback, caption, keyboard)
+
+
+async def _show_text_screen(
+    callback: CallbackQuery,
+    text: str,
+    keyboard: InlineKeyboardMarkup,
+) -> None:
+    """Текстовый экран: фото-сообщение нельзя отредактировать в текст."""
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text=text, reply_markup=keyboard)
+    else:
+        await callback.message.edit_text(text=text, reply_markup=keyboard)
+
+
+async def _show_info_hub(callback: CallbackQuery) -> None:
+    await _show_photo_screen(
+        callback,
+        INFO_HUB_IMG,
+        LEXICON_RU["more_information_text"],
+        create_info_hub_keyboard(),
+    )
+
+
 # Этот хэндлер будет срабатывать на нажатие инлайн-кнопки "🤔 Все об авто из США"
 @user_router.callback_query(F.data == "more_information_button")
 async def process_more_information_press(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        text=LEXICON_RU["more_information_text"],
-        reply_markup=create_info_hub_keyboard(),
-    )
+    await _show_info_hub(callback)
 
 
-# Разделы хаба "Все об авто из США": callback кнопки -> ключ текста в LEXICON_RU
+# Разделы хаба "Все об авто из США": callback кнопки -> ключ текста и картинка
 _INFO_SECTIONS = {
-    "why_profitable_button": "why_profitable_text",
-    "purchasing_process_button": "purchasing_process_text",
-    "auctions_button": "auctions_text",
-    "price_breakdown_button": "price_breakdown_text",
+    "why_profitable_button": (
+        "why_profitable_text",
+        ABOUT_AMERICA_TRADE_IMG_DIR / "why_profitable.png",
+    ),
+    "purchasing_process_button": (
+        "purchasing_process_text",
+        ABOUT_AMERICA_TRADE_IMG_DIR / "purchasing_process.png",
+    ),
+    "auctions_button": ("auctions_text", ABOUT_AMERICA_TRADE_IMG_DIR / "auctions.png"),
+    "price_breakdown_button": (
+        "price_breakdown_text",
+        ABOUT_AMERICA_TRADE_IMG_DIR / "price_breakdown.png",
+    ),
 }
 
 
@@ -157,19 +218,21 @@ _INFO_SECTIONS = {
 @user_router.callback_query(F.data.in_(set(_INFO_SECTIONS)))
 async def process_info_section_press(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        text=LEXICON_RU[_INFO_SECTIONS[callback.data]],
-        reply_markup=create_choice_keyboard(
-            (
-                "application_for_selection_button",
-                "free_consultation_button",
-                ButtonStyle.SUCCESS,
-            ),
-            ("back_to:info_hub", "back_button"),
-            "back_to:main_menu",
-            width=1,
+    text_key, image = _INFO_SECTIONS[callback.data]
+    keyboard = create_choice_keyboard(
+        (
+            "application_for_selection_button",
+            "free_consultation_button",
+            ButtonStyle.SUCCESS,
         ),
+        ("back_to:info_hub", "back_button"),
+        "back_to:main_menu",
+        width=1,
     )
+    if image is not None:
+        await _show_photo_screen(callback, image, LEXICON_RU[text_key], keyboard)
+    else:
+        await _show_text_screen(callback, LEXICON_RU[text_key], keyboard)
 
 
 # Этот хэндлер будет срабатывать на нажатие инлайн-кнопки "⭐ Почему именно AmericaTrade?"
@@ -179,9 +242,11 @@ async def process_info_section_press(callback: CallbackQuery):
 )
 async def process_why_americatrade_press(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        text=LEXICON_RU["why_americatrade_text"],
-        reply_markup=create_why_americatrade_keyboard(
+    await _show_photo_screen(
+        callback,
+        WHY_AMERICATRADE_IMG,
+        LEXICON_RU["why_americatrade_text"],
+        create_why_americatrade_keyboard(
             show_back=callback.data == "why_americatrade_from_hub"
         ),
     )
@@ -210,10 +275,7 @@ async def procces_back_button_press(callback: CallbackQuery):
         else:
             await callback.message.edit_text(text=text, reply_markup=keyboard)
     elif target == "info_hub":
-        await callback.message.edit_text(
-            text=LEXICON_RU["more_information_text"],
-            reply_markup=create_info_hub_keyboard(),
-        )
+        await _show_info_hub(callback)
 
 
 # Этот хэндлер будет срабатывать на нажатие инлайн-кнопки "✅ Подобрать авто из США"
