@@ -154,6 +154,52 @@ def match_car(
     return True
 
 
+# Сколько лотов проверяем на наличие фото за один заход
+IMAGE_LOOKUP_BATCH = 12
+# Потолок проверок на один поиск: у Copart фото есть примерно у каждого пятого
+# лота, поэтому кандидатов приходится перебирать, но не бесконечно
+MAX_IMAGE_LOOKUPS = 60
+
+
+async def collect_cars_with_images(
+    candidates: List[dict], count: int
+) -> List[Tuple[dict, List[str]]]:
+    """Collect up to ``count`` lots that actually have photos.
+
+    Copart serves images for a minority of lots, so checking only the first
+    ``count`` candidates regularly yielded nothing and the user saw "нет
+    вариантов" on a search that had thousands of matches. Candidates are
+    therefore topped up batch by batch until enough lots with photos are found.
+
+    Args:
+        candidates: Matching rows in the order they should be offered.
+        count: How many cars the caller wants.
+
+    Returns:
+        Pairs of row and its image URLs, at most ``count`` items.
+    """
+    cars: List[Tuple[dict, List[str]]] = []
+    async with aiohttp.ClientSession() as aio_session:
+        for start in range(
+            0, min(len(candidates), MAX_IMAGE_LOOKUPS), IMAGE_LOOKUP_BATCH
+        ):
+            batch = candidates[start : start + IMAGE_LOOKUP_BATCH]
+            images_results = await asyncio.gather(
+                *(get_images(row, aio_session) for row in batch)
+            )
+            cars.extend((row, imgs) for row, imgs in zip(batch, images_results) if imgs)
+            if len(cars) >= count:
+                break
+
+    if not cars:
+        logger.warning(
+            "Нет лотов с фото: проверено %d из %d подходящих",
+            min(len(candidates), MAX_IMAGE_LOOKUPS),
+            len(candidates),
+        )
+    return cars[:count]
+
+
 # Получение данных по заявке пользователя
 async def get_data(user_dict: dict, count: int = 6) -> List[Tuple[dict, List[str]]]:
     brand = user_dict["brand"]
@@ -179,17 +225,7 @@ async def get_data(user_dict: dict, count: int = 6) -> List[Tuple[dict, List[str
         return []
 
     random.shuffle(filtered)
-    selected = filtered[:count]
-
-    # Параллельная загрузка картинок
-    async with aiohttp.ClientSession() as aio_session:
-        images_results = await asyncio.gather(
-            *(get_images(row, aio_session) for row in selected)
-        )
-
-    # Возвращаем только те, у которых есть картинки
-    cars = [(row, imgs) for row, imgs in zip(selected, images_results) if imgs]
-    return cars[:count]
+    return await collect_cars_with_images(filtered, count)
 
 
 # Группы кузовов для случайной подборки в рассылке
