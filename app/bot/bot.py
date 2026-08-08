@@ -30,6 +30,19 @@ from app.infrastructure.database.connection import get_pg_pool
 
 logger = logging.getLogger(__name__)
 
+# Порядок значим: хэндлеры шагов подбора стоят на StateFilter и принимают в
+# своем состоянии любой callback, поэтому "Назад" подключается первым.
+ROUTERS = (
+    step_back_router,
+    user_router,
+    self_selection_router,
+    assisted_selection_router,
+    consultation_request_router,
+    subscriptions_router,
+    admin_router,
+    others_router,
+)
+
 
 def _install_signal_handlers(stop_event: asyncio.Event) -> None:
     """Регистрирует обработчики SIGINT/SIGTERM, чтобы корректно прерывать polling."""
@@ -91,17 +104,7 @@ async def main(config: Config) -> None:
 
     # Подключаем роутеры в нужном порядке
     logger.info("Including routers...")
-    dp.include_routers(
-        # Первым: хэндлеры шагов подбора ловят в своем состоянии любой callback
-        step_back_router,
-        user_router,
-        self_selection_router,
-        assisted_selection_router,
-        consultation_request_router,
-        subscriptions_router,
-        admin_router,
-        others_router,
-    )
+    dp.include_routers(*ROUTERS)
 
     # Подключаем миддлвари в нужном порядке
     logger.info("Including middlewares...")
