@@ -90,7 +90,7 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "📲 <b>На каждом этапе ваш менеджер на связи 24/7 - звонок, сообщение, голосовое. Как вам удобно.</b>",
     "auctions_text": "<b>🤔 На каких аукционах происходит покупка?</b>\r\n\n"
     "Мы работаем не через посредников - у нас <b>официальные брокерские доступы</b> ко всем площадкам США.\r\n\n"
-    "<b>Аукционы битых и страховых авто:</b>\r\n"
+    "<b>Аукционы битых и целых авто:</b>\r\n"
     "✅ Copart\r\n"
     "✅ IAAI\r\n"
     "✅ Manheim\r\n"
@@ -127,10 +127,12 @@ LEXICON_RU: dict[str, Callable[[Any], str] | str] = {
     "choose_body_style_text": "Какой тип авто вам ближе?",
     "choose_budget_text": "В какой бюджет планируете покупку?",
     "nothing_found_text": "УПС...\r\n"
-    "К сожалению на данный момент на аукционе нет вариантов под Ваши критерии.",
+    "К сожалению на данный момент на аукционе нет вариантов под Ваши критерии. "
+    "Можете оставить заявку и менеджер поможет с подбором автомобиля.",
     "no_more_cars_text": "Больше вариантов не найдено.",
     "cars_describe_text": "Вы можете выбрать понравившийся автомобиль или продолжить поиск:",
     "assisted_gallery_empty_text": "Пока нет примеров для этой комбинации кузова и бюджета. Попробуйте другой бюджет или оставьте заявку — подберём вручную.",
+    "gallery_send_failed_text": "Не удалось показать примеры из-за технической неполадки. Наш менеджер подберёт варианты под ваш запрос вручную.",
     "consultation_intro_text": "🎯 Отлично! Мы передадим запрос менеджеру, он свяжется с вами, уточнит детали, ответит на все ваши вопросы и поможет с выбором\r\n\n"
     "Чтобы вы могли получить бесплатную консультацию, оставьте ваш номер телефона",
     "self_lead_intro_text": "👀 Оставьте ваш номер телефона и наш менеджер свяжется с вами в ближайшее время - уточнит детали по вашему запросу, ответит на ваши вопросы и предоставит детальный расчет\r\n\n"
@@ -494,7 +496,7 @@ LEXICON_FORM_BUTTONS_RU: dict[str, Callable[[Any], str]] = {
             "GOLF",
             "JETTA",
             "PASSAT",
-            "TAOS SE",
+            "TAOS",
             "TIGUAN",
         ],
         "VOLVO": ["ALL MODELS", "S60", "S90", "XC40", "XC60", "XC90"],
@@ -559,6 +561,10 @@ LEXICON_EN_RU: dict[str, dict[str, str]] = {
         "UNKNOWN - NOT OK FOR INV.": "Не указан",
         "PINK": "Розовый",
     },
+    # Ключи ищутся по нормализованному виду (верхний регистр, дефисы как пробелы),
+    # потому что Copart пишет одно и то же значение в разных регистрах:
+    # "ALL WHEEL DRIVE", "All Wheel Drive", "All wheel drive".
+    # Пустая строка означает "не выводить поле".
     "Drive": {
         "Front-wheel Drive": "Передний",
         "Rear-wheel drive": "Задний",
@@ -566,8 +572,44 @@ LEXICON_EN_RU: dict[str, dict[str, str]] = {
         "All wheel drive": "Полный",
         "4x4 w/Front Whl Drv": "Полный",
         "Four by Four": "Полный",
+        "Rear Wheel Drive w/4x4": "Полный",
+        "Front Wheel Drive w/4x4": "Полный",
+        "4x2": "Моноприводный",
+        "Unknown": "",
     },
-    "Transmission": {"AUTOMATIC": "АКПП", "MANUAL": "МКПП"},
+    "Transmission": {
+        "AUTOMATIC": "АКПП",
+        "MANUAL": "МКПП",
+        "Unknown": "",
+        "None": "",
+    },
+    "Damage": {
+        "FRONT END": "Передняя часть",
+        "REAR END": "Задняя часть",
+        "SIDE": "Боковая часть",
+        "MINOR DENT/SCRATCHES": "Незначительные вмятины и царапины",
+        "HAIL": "Град",
+        "MECHANICAL": "Механические неисправности",
+        "NORMAL WEAR": "Обычный износ",
+        "ALL OVER": "По всему кузову",
+        "ROLLOVER": "Опрокидывание",
+        "WATER/FLOOD": "Подтопление",
+        "UNDERCARRIAGE": "Днище",
+        "VANDALISM": "Вандализм",
+        "BURN": "Возгорание",
+        "TOP/ROOF": "Крыша",
+        "BURN - ENGINE": "Возгорание в моторном отсеке",
+        "BURN - INTERIOR": "Возгорание в салоне",
+        "STRIPPED": "Отсутствуют детали",
+        "FRAME DAMAGE": "Повреждение кузова",
+        "DAMAGE HISTORY": "Повреждения в истории",
+        "BIOHAZARD/CHEMICAL": "Химическое загрязнение",
+        "PARTIAL REPAIR": "Частичный ремонт",
+        "REJECTED REPAIR": "Некачественный ремонт",
+        "MISSING/ALTERED VIN": "Проблемы с VIN",
+        "REPLACED VIN": "Заменен VIN",
+        "UNKNOWN": "",
+    },
 }
 
 
@@ -583,26 +625,82 @@ LEXICON_ASSISTED_GALLERY_RU: dict[str, Callable[..., str]] = {
 }
 
 
-LEXICON_CAPTION_RU: dict[str, Callable[[Any], str] | str] = {
-    "caption_text": lambda name, number, year, brand, model, color, odometer, engine, drive, transmission, sale_date, buy_now_price=None: (
+def _miles_to_km(odometer: str) -> str:
+    """Convert the CSV odometer to kilometres; empty string if it is not a number."""
+    try:
+        return str(int(float(odometer) * 1.60934))
+    except (TypeError, ValueError):
+        return ""
+
+
+def _format_sale_date(sale_date: str) -> str:
+    """Format the CSV auction date ``YYYYMMDD``; ``"0"`` means it is not scheduled."""
+    if not sale_date or sale_date == "0":
+        return "Не назначена"
+    return f"{sale_date[0:4]}-{sale_date[4:6]}-{sale_date[6:]}"
+
+
+def _car_caption(
+    name: str,
+    number: int,
+    title: str,
+    *,
+    year: str = "",
+    color: str = "",
+    engine: str = "",
+    transmission: str = "",
+    drive: str = "",
+    odometer: str = "",
+    damage: str = "",
+    sale_date: str = "",
+    buy_now_price: int | None = None,
+) -> str:
+    """Build the caption of a car card.
+
+    Fields the auction left empty are skipped: an empty "✅ Привод:" line in the
+    card reads as a bug to the client.
+
+    Args:
+        name: First name of the recipient.
+        number: Position of the card in the current batch.
+        title: Full car name (make, model and trim).
+        year: Model year.
+        color: Colour, already translated.
+        engine: Engine as printed in the CSV, e.g. ``"3.7L 6"``.
+        transmission: Transmission, already translated.
+        drive: Drive type, already translated.
+        odometer: Odometer in miles as printed in the CSV.
+        damage: Damage type, already translated.
+        sale_date: Auction date as ``YYYYMMDD``, or ``"0"`` when not scheduled.
+        buy_now_price: Fixed BUY NOW price, if the lot has one.
+
+    Returns:
+        Caption text with HTML markup.
+    """
+    lines = [
         f"{name}, на данный момент доступны следующие варианты:\r\n"
         f"<b>Автомобиль № {number}</b>\r\n"
-        f"<b>{brand} {model}</b> 🔥\r\n\n"
-        + (
-            f"💵 Предварительный ориентир: {buy_now_price:,}$\r\n\n".replace(",", " ")
-            if buy_now_price
-            else ""
-        )
-        + f"✅ Модельный год: {year}\r\n"
-        f"✅ Цвет: {color}\r\n"
-        f"✅ Объем двигателя: {engine[:4]}\r\n"
-        f"✅ Трансмиссия: {transmission}\r\n"
-        f"✅ Привод: {drive}\r\n"
-        f"✅ Пробег: {int(float(odometer) * 1.60934)} км.\r\n"
-        f"⌛ Дата аукциона: "
-        f"{'Не назначена' if sale_date == '0' else sale_date[0:4] + '-' + sale_date[4:6] + '-' + sale_date[6:]}"
-    )
-}
+        f"<b>{title}</b> 🔥\r\n"
+    ]
+    if buy_now_price:
+        lines.append(f"💵 Фиксированная цена: {buy_now_price:,}$\r\n".replace(",", " "))
+
+    kilometres = _miles_to_km(odometer)
+    fields = [
+        ("✅ Модельный год", year),
+        ("✅ Цвет", color),
+        ("✅ Объем двигателя", engine[:4].strip()),
+        ("✅ Трансмиссия", transmission),
+        ("✅ Привод", drive),
+        ("✅ Пробег", f"{kilometres} км." if kilometres else ""),
+        ("✅ Вид повреждения", damage),
+    ]
+    lines.append("\r\n".join(f"{label}: {value}" for label, value in fields if value))
+    lines.append(f"⌛ Дата аукциона: {_format_sale_date(sale_date)}")
+    return "\r\n".join(lines)
+
+
+LEXICON_CAPTION_RU: dict[str, Callable[..., str]] = {"caption_text": _car_caption}
 
 LEXICON_NEWSLETTER_RU: dict[str, str] = {
     "car_selection_text": "Вы можете выбрать понравившийся автомобиль и мы оперативно изучим данный лот🔥 на аукционе и свяжемся с Вами и предоставим всю информацию с расчетом финальной цены в РБ!"

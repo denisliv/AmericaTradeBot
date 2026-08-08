@@ -18,6 +18,7 @@ from psycopg.connection_async import AsyncConnection
 from app.bot.enums.roles import UserRole
 from app.bot.keyboards.keyboards_inline import (
     create_choice_keyboard,
+    create_choose_a_car_keyboard,
     create_contacts_keyboard,
     create_why_americatrade_keyboard,
 )
@@ -284,5 +285,5 @@ async def process_choose_a_car_press(callback: CallbackQuery):
     await callback.answer()
     await callback.message.answer(
         text=LEXICON_RU["choose_a_car_text"],
-        reply_markup=create_choice_keyboard("knowing_button", "advice_button", width=1),
+        reply_markup=create_choose_a_car_keyboard(),
     )

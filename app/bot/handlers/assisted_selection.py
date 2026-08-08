@@ -4,9 +4,15 @@ from aiogram import F, Router
 from aiogram.enums import ButtonStyle
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from psycopg.connection_async import AsyncConnection
 
+from app.bot.callback_data import STEP_BACK_PREFIX
 from app.bot.handlers.consultation_request import start_consultation_phone_request
 from app.bot.keyboards.keyboards_inline import (
     create_assisted_results_keyboard,
@@ -16,9 +22,9 @@ from app.bot.states.states import FSMFillAssistedSelectionForm
 from app.infrastructure.database.selections import add_assisted_selection_request
 from app.infrastructure.services.assisted_gallery import (
     build_top_media_group,
+    get_gallery_page,
     make_ag_lead_callback,
     parse_ag_lead_callback,
-    pick_top_assisted_gallery,
     safe_send_assisted_gallery_media_group,
 )
 from app.lexicon.lexicon_ru import (
@@ -38,6 +44,32 @@ _TOP_CATEGORY_BY_BODY = {
 }
 
 
+async def show_body_style_step(message: Message, state: FSMContext) -> None:
+    """Screen "какой тип авто вам ближе" - the first step of the assisted branch."""
+    await message.edit_text(
+        text=LEXICON_RU["choose_body_style_text"],
+        reply_markup=create_choice_keyboard(
+            *LEXICON_FORM_BUTTONS_RU["body_style_buttons"],
+            (f"{STEP_BACK_PREFIX}start", "back_button"),
+            width=1,
+        ),
+    )
+    await state.set_state(FSMFillAssistedSelectionForm.get_body_style)
+
+
+async def show_budget_step(message: Message, state: FSMContext) -> None:
+    """Screen "в какой бюджет планируете покупку"."""
+    await message.edit_text(
+        text=LEXICON_RU["choose_budget_text"],
+        reply_markup=create_choice_keyboard(
+            *LEXICON_FORM_BUTTONS_RU["budget_buttons"],
+            (f"{STEP_BACK_PREFIX}body_style", "back_button"),
+            width=1,
+        ),
+    )
+    await state.set_state(FSMFillAssistedSelectionForm.get_budget)
+
+
 # Этот хэндлер будет срабатывать на кнопки "🙎‍♂️ Пока нужна помощь в выборе"
 # и "🚗 Изменить запрос" на экранах этой ветки
 @assisted_selection_router.callback_query(
@@ -46,14 +78,8 @@ _TOP_CATEGORY_BY_BODY = {
 )
 async def process_advice_button_press(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text(
-        text=LEXICON_RU["choose_body_style_text"],
-        reply_markup=create_choice_keyboard(
-            *LEXICON_FORM_BUTTONS_RU["body_style_buttons"], width=1
-        ),
-    )
+    await show_body_style_step(callback.message, state)
     await callback.answer()
-    await state.set_state(FSMFillAssistedSelectionForm.get_body_style)
 
 
 # Этот хэндлер будет срабатывать на выбор типа авто
@@ -61,15 +87,9 @@ async def process_advice_button_press(callback: CallbackQuery, state: FSMContext
     StateFilter(FSMFillAssistedSelectionForm.get_body_style)
 )
 async def process_body_type_button_press(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        text=LEXICON_RU["choose_budget_text"],
-        reply_markup=create_choice_keyboard(
-            *LEXICON_FORM_BUTTONS_RU["budget_buttons"], width=1
-        ),
-    )
-    await callback.answer()
     await state.update_data(body_style=callback.data)
-    await state.set_state(FSMFillAssistedSelectionForm.get_budget)
+    await show_budget_step(callback.message, state)
+    await callback.answer()
 
 
 # Этот хэндлер будет срабатывать на выбор бюджета: шлет ТОП-подборку
@@ -102,7 +122,7 @@ async def process_budget_button_press(
     # body_style/budget остаются в данных FSM: нужны для "Подобрать еще"
     # и контекста Bitrix-лида
     await state.set_state(None)
-    await state.update_data(budget=budget)
+    await state.update_data(budget=budget, gallery_offset=0, gallery_shown=0)
     await _send_top_picks(callback, state, body_style=body_style, budget=budget)
 
 
@@ -113,8 +133,17 @@ async def _send_top_picks(
     body_style: str,
     budget: str,
 ) -> None:
-    """ТОП-подборка с карточками и финальным сообщением с действиями."""
-    picks = pick_top_assisted_gallery(body_style, budget)
+    """Одна страница подборки: карточки по приоритету и сообщение с действиями.
+
+    Страница берётся по сохранённому смещению, поэтому "Подобрать еще" никогда
+    не повторяет уже показанные авто. Смещение двигается на просмотренные
+    позиции, а не на доставленные карточки: карточка, которую Telegram отверг
+    из-за битого файла, иначе возвращалась бы при каждом нажатии.
+    """
+    data = await state.get_data()
+    offset = data.get("gallery_offset", 0)
+    shown = data.get("gallery_shown", 0)
+    picks, next_offset = get_gallery_page(body_style, budget, offset=offset)
     if not picks:
         # Примеров нет - сразу предлагаем консультацию, контекст уходит в Bitrix
         await callback.message.answer(text=LEXICON_RU["assisted_gallery_empty_text"])
@@ -125,23 +154,29 @@ async def _send_top_picks(
         )
         return
 
-    await callback.message.answer(
-        text=LEXICON_ASSISTED_GALLERY_RU["top_header"](
-            _TOP_CATEGORY_BY_BODY.get(body_style, "авто")
+    if offset == 0:
+        await callback.message.answer(
+            text=LEXICON_ASSISTED_GALLERY_RU["top_header"](
+                _TOP_CATEGORY_BY_BODY.get(body_style, "авто")
+            )
         )
-    )
     first_name = callback.from_user.first_name or "Пользователь"
-    for number, pick in enumerate(picks, 1):
-        await safe_send_assisted_gallery_media_group(
+    sent = 0
+    for pick in picks:
+        # Кнопка выбора уходит только вместе с альбомом: иначе клиент получает
+        # карточку без фото и описания
+        if not await safe_send_assisted_gallery_media_group(
             callback, build_top_media_group(first_name, pick)
-        )
+        ):
+            continue
+        sent += 1
         await callback.message.answer(
             text="👇 Нажмите кнопку, чтобы получить расчёт цены под ключ в РБ:",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text=f"✅ Пример № {number}: {pick.display_title}",
+                            text=f"✅ Пример № {shown + sent}: {pick.display_title}",
                             callback_data=make_ag_lead_callback(pick),
                             style=ButtonStyle.PRIMARY,
                         )
@@ -151,14 +186,27 @@ async def _send_top_picks(
         )
         await asyncio.sleep(0.2)
 
+    await state.update_data(gallery_offset=next_offset, gallery_shown=shown + sent)
+
+    if not sent:
+        # Ни одна карточка не дошла: честно говорим об этом и ведём к менеджеру
+        await callback.message.answer(text=LEXICON_RU["gallery_send_failed_text"])
+        await start_consultation_phone_request(
+            callback.message,
+            state,
+            extra_data={"body_style": body_style, "budget": budget},
+        )
+        return
+
+    next_page, _ = get_gallery_page(body_style, budget, offset=next_offset, limit=1)
     await callback.message.answer(
         text=LEXICON_RU["cars_describe_text"],
-        reply_markup=create_assisted_results_keyboard(),
+        reply_markup=create_assisted_results_keyboard(else_car=bool(next_page)),
     )
 
 
 # Этот хэндлер будет срабатывать на кнопку "Подобрать еще":
-# присылает новую ТОП-подборку по тем же кузову и бюджету
+# присылает следующие по приоритету авто того же кузова и бюджета
 @assisted_selection_router.callback_query(
     F.data == "else_car_button_assisted",
     flags={"long_operation": "typing", "blocking": "blocking"},
@@ -170,14 +218,8 @@ async def process_else_top_button_press(callback: CallbackQuery, state: FSMConte
 
     if not body_style or not budget:
         # Контекст утерян (например, рестарт бота) - начинаем подбор заново
-        await callback.message.edit_text(
-            text=LEXICON_RU["choose_body_style_text"],
-            reply_markup=create_choice_keyboard(
-                *LEXICON_FORM_BUTTONS_RU["body_style_buttons"], width=1
-            ),
-        )
+        await show_body_style_step(callback.message, state)
         await callback.answer()
-        await state.set_state(FSMFillAssistedSelectionForm.get_body_style)
         return
 
     await callback.answer()

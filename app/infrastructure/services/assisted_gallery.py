@@ -1,43 +1,43 @@
-"""Локальная галерея примеров для assisted selection (кузов → бюджет → папка авто → фото).
+"""Локальная галерея примеров для assisted selection.
 
-Структура каталога (корень по умолчанию ``data/assisted_gallery``)::
+Каталог собирается скриптом ``scripts/import_gallery.py`` из выгрузки Google
+Drive: ``<кузов>/<бюджет>/<приоритет>_<марка_модель>/*.jpg`` плюс манифест
+``gallery.json`` с приоритетом и полным названием каждого авто::
 
-    assisted_gallery/
-      sedan/
-        0-12k/
-          toyota_camry/
-            01.jpg
-            ...
-        12k-15k/
-        15k-20k/
-        20k-30k/
-        30k-50k/
-        50k-plus/
-      suv/
-        ...
-      electric/
-        ...
+    {"suv": {"0-12k": [{"priority": 1,
+                        "title": "2021 Chevrolet Equinox",
+                        "folder": "001_2021_chevrolet_equinox",
+                        "photos": 8}]}}
 
-Имена папок кузова и бюджета — латиница, как в константах ниже.
-Папки автомобилей — латиница и подчёркивания (например ``honda_accord``); подпись для
-пользователя строится из имени папки автоматически.
+Порядок выдачи задаёт заказчик нумерацией папок в Drive, поэтому подборка идёт
+строго по приоритету, а не случайно.
 """
 
 from __future__ import annotations
 
 import asyncio
-import random
+import json
+import logging
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Final, Optional
 
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+    TelegramServerError,
+)
 from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto
 
 from app.infrastructure.paths import ASSISTED_GALLERY_DIR
 from app.lexicon.lexicon_ru import LEXICON_ASSISTED_GALLERY_RU
 
+logger = logging.getLogger(__name__)
+
 ASSISTED_GALLERY_ROOT: Final[Path] = ASSISTED_GALLERY_DIR
+MANIFEST_NAME: Final[str] = "gallery.json"
 
 BODY_DIR: Final[dict[str, str]] = {
     "🚙 Кроссовер/SUV": "suv",
@@ -57,9 +57,10 @@ BUDGET_DIR: Final[dict[str, str]] = {
     "50 000$ +": "50k-plus",
 }
 
-_IMAGE_SUFFIXES: Final[frozenset[str]] = frozenset(
-    {".jpg", ".jpeg", ".png", ".webp"}
-)
+# Сколько фото уходит в одном альбоме карточки
+MAX_PHOTOS: Final[int] = 5
+# Размер страницы подборки
+PAGE_SIZE: Final[int] = 3
 
 
 @dataclass(frozen=True)
@@ -71,84 +72,109 @@ class AssistedGalleryPick:
     budget_key: str
 
 
-def _folder_title(name: str) -> str:
-    return name.replace("_", " ").strip().title()
+@lru_cache(maxsize=1)
+def _load_manifest(root: Path) -> dict:
+    """Read ``gallery.json``; an absent manifest means an empty gallery."""
+    path = root / MANIFEST_NAME
+    if not path.is_file():
+        logger.warning("Gallery manifest not found: %s", path)
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _list_car_dirs(budget_path: Path) -> list[Path]:
-    if not budget_path.is_dir():
-        return []
-    dirs = [
-        p for p in budget_path.iterdir() if p.is_dir() and not p.name.startswith(".")
-    ]
-    return sorted(dirs, key=lambda p: p.name.lower())
+def _ordered_cars(root: Path, body_key: str, budget_slug: str) -> list[dict]:
+    manifest = _load_manifest(root)
+    cars = manifest.get(BODY_DIR[body_key], {}).get(budget_slug, [])
+    return sorted(cars, key=lambda car: car["priority"])
 
 
-def _list_images(car_dir: Path) -> list[Path]:
-    files = []
-    for p in car_dir.iterdir():
-        if p.is_file() and p.suffix.lower() in _IMAGE_SUFFIXES:
-            files.append(p)
-    return sorted(files, key=lambda x: x.name.lower())
+def _interleave(
+    groups: list[list[tuple[str, dict]]],
+) -> list[tuple[str, dict]]:
+    """Merge per-body lists so that the types alternate instead of going in blocks."""
+    merged: list[tuple[str, dict]] = []
+    for position in range(max((len(group) for group in groups), default=0)):
+        for group in groups:
+            if position < len(group):
+                merged.append(group[position])
+    return merged
 
 
-def pick_top_assisted_gallery(
+def get_gallery_page(
     body_style_key: str,
     budget_key: str,
     *,
-    count: int = 3,
-    max_photos: int = 5,
+    offset: int = 0,
+    limit: int = PAGE_SIZE,
     root: Optional[Path] = None,
-) -> list[AssistedGalleryPick]:
-    """ТОП-подборка: до ``count`` разных авто в категории и бюджете.
+) -> tuple[list[AssistedGalleryPick], int]:
+    """Return one page of the selection, ordered by the customer's priority.
 
-    Для ``ANY_BODY_KEY`` авто выбираются по всем кузовам сразу (без привязки к типу).
-    Папки без изображений пропускаются; повторы по названию авто исключаются.
+    Args:
+        body_style_key: Body style button text.
+        budget_key: Budget button text.
+        offset: Position in the category the previous page stopped at.
+        limit: Page size.
+        root: Gallery root, for tests.
+
+    Returns:
+        Cars of the page and the offset the next page must start from. The
+        offset counts scanned positions, not delivered cards: a car skipped
+        because its folder went missing must not shift the next page back onto
+        an already shown car.
     """
     base = root or ASSISTED_GALLERY_ROOT
     budget_slug = BUDGET_DIR.get(budget_key)
     if not budget_slug:
-        return []
+        return [], offset
 
     if body_style_key == ANY_BODY_KEY:
-        body_keys = list(BODY_DIR)
+        # Типы кузова чередуются, иначе первая страница была бы из одних кроссоверов
+        ordered = _interleave(
+            [
+                [(key, car) for car in _ordered_cars(base, key, budget_slug)]
+                for key in BODY_DIR
+            ]
+        )
     elif body_style_key in BODY_DIR:
-        body_keys = [body_style_key]
+        ordered = [
+            (body_style_key, car)
+            for car in _ordered_cars(base, body_style_key, budget_slug)
+        ]
     else:
-        return []
-
-    candidates: list[tuple[str, Path]] = []
-    for body_key in body_keys:
-        budget_path = base / BODY_DIR[body_key] / budget_slug
-        candidates.extend((body_key, p) for p in _list_car_dirs(budget_path))
-
-    random.shuffle(candidates)
+        return [], offset
 
     picks: list[AssistedGalleryPick] = []
-    seen_folders: set[str] = set()
-    for body_key, car_dir in candidates:
-        if len(picks) >= count:
-            break
-        if car_dir.name in seen_folders:
+    position = offset
+    while position < len(ordered) and len(picks) < limit:
+        body_key, car = ordered[position]
+        position += 1
+        car_dir = base / BODY_DIR[body_key] / budget_slug / car["folder"]
+        if not car_dir.is_dir():
+            # Манифест разошелся с файлами (например, неполный перенос на сервер)
+            logger.warning("Gallery folder is missing: %s", car_dir)
             continue
-        images = _list_images(car_dir)
+        images = sorted(
+            (p for p in car_dir.iterdir() if p.is_file()), key=lambda p: p.name.lower()
+        )
         if not images:
+            logger.warning("Gallery folder without images: %s", car_dir)
             continue
-        seen_folders.add(car_dir.name)
-        k = min(max_photos, len(images))
         picks.append(
             AssistedGalleryPick(
-                car_folder=car_dir.name,
-                display_title=_folder_title(car_dir.name),
-                image_paths=random.sample(images, k=k),
+                car_folder=car["folder"],
+                display_title=car["title"],
+                image_paths=images[:MAX_PHOTOS],
                 body_style_key=body_key,
                 budget_key=budget_key,
             )
         )
-    return picks
+    return picks, position
 
 
-def parse_ag_lead_callback(data: str) -> Optional[tuple[str, str, str, str]]:
+def parse_ag_lead_callback(
+    data: str, *, root: Optional[Path] = None
+) -> Optional[tuple[str, str, str, str]]:
     """Возвращает (car_folder, body_key_ru, budget_key_ru, display_title) или None."""
     parts = data.split("|", 3)
     if len(parts) != 4 or parts[0] != "ag_lead":
@@ -158,7 +184,21 @@ def parse_ag_lead_callback(data: str) -> Optional[tuple[str, str, str, str]]:
     budget_ru = next(
         (k for k, v in BUDGET_DIR.items() if v == budget_slug), budget_slug
     )
-    return car_folder, body_ru, budget_ru, _folder_title(car_folder)
+    title = _title_by_folder(
+        root or ASSISTED_GALLERY_ROOT, body_slug, budget_slug, car_folder
+    )
+    return car_folder, body_ru, budget_ru, title
+
+
+def _title_by_folder(
+    root: Path, body_slug: str, budget_slug: str, car_folder: str
+) -> str:
+    """Look the display title up in the manifest; fall back to the folder name."""
+    cars = _load_manifest(root).get(body_slug, {}).get(budget_slug, [])
+    for car in cars:
+        if car["folder"] == car_folder:
+            return car["title"]
+    return car_folder.replace("_", " ").strip()
 
 
 def make_ag_lead_callback(pick: AssistedGalleryPick) -> str:
@@ -199,12 +239,25 @@ async def safe_send_assisted_gallery_media_group(
     callback: CallbackQuery,
     media_group: list[InputMediaPhoto],
 ) -> bool:
-    try:
-        await callback.message.answer_media_group(media=media_group)
-        return True
-    except TelegramRetryAfter as e:
-        await asyncio.sleep(e.retry_after)
-        await callback.message.answer_media_group(media=media_group)
-        return True
-    except TelegramBadRequest:
-        return False
+    """Send one album, retrying only errors that can succeed on a second try.
+
+    ``TelegramBadRequest`` means Telegram rejected the content itself (broken or
+    unsupported file, oversized image): a retry would fail the same way, so the
+    card is skipped and the reason is logged.
+
+    Returns:
+        True if the album was delivered.
+    """
+    for attempt in range(2):
+        try:
+            await callback.message.answer_media_group(media=media_group)
+            return True
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+        except TelegramBadRequest as e:
+            logger.warning("Gallery album rejected by Telegram: %s", e)
+            return False
+        except (TelegramNetworkError, TelegramServerError) as e:
+            logger.warning("Gallery album not sent (attempt %d): %s", attempt + 1, e)
+            await asyncio.sleep(1)
+    return False

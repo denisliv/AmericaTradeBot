@@ -44,9 +44,19 @@ def create_choice_keyboard(*buttons: ChoiceButton, width: int = 2) -> InlineKeyb
     return kb_builder.as_markup()
 
 
-SITE_URL = "https://americatrade.by"
+SITE_URL = "https://americatrade.by/?utm_source=telegram-bot"
 REVIEWS_YANDEX_URL = "https://yandex.by/maps/org/america_trade/209802914458/reviews/?ll=27.562783%2C53.871084&z"
 REVIEWS_GOOGLE_URL = "https://www.google.com/maps/place/America+Trade/@53.8715902,27.5585072,16z/data=!4m8!3m7!1s0x46dbd10c8f4ca66d:0xc0b4e3cdc9108439!8m2!3d53.8711443!4d27.5627987!9m1!1b1!16s%2Fg%2F11wfs6slw5?entry=ttu&g_ep=EgoyMDI1MDcyMy4wIKXMDSoASAFQAw%3D%3D"
+
+
+# Функция, генерирующая клавиатуру экрана "Вы уже определились, какой автомобиль хотите?"
+def create_choose_a_car_keyboard() -> InlineKeyboardMarkup:
+    return create_choice_keyboard(
+        "knowing_button",
+        "advice_button",
+        ("back_to:main_menu", "back_button"),
+        width=1,
+    )
 
 
 # Функция, генерирующая клавиатуру экрана "✅ Контакт получен!"
@@ -169,14 +179,14 @@ def create_self_lead_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-# Функция, генерирующая клавиатуру действий после ТОП-подборки по кузову/бюджету
-def create_assisted_results_keyboard() -> InlineKeyboardMarkup:
-    return create_choice_keyboard(
-        ("change_request_assisted", "change_request_button"),
-        ("else_car_button_assisted", "else_car_button"),
-        ("self_request_button", "self_request_button", ButtonStyle.SUCCESS),
-        width=1,
-    )
+# Функция, генерирующая клавиатуру действий после ТОП-подборки по кузову/бюджету.
+# else_car убирается, когда в категории не осталось непоказанных авто
+def create_assisted_results_keyboard(*, else_car: bool = True) -> InlineKeyboardMarkup:
+    buttons: list[ChoiceButton] = [("change_request_assisted", "change_request_button")]
+    if else_car:
+        buttons.append(("else_car_button_assisted", "else_car_button"))
+    buttons.append(("self_request_button", "self_request_button", ButtonStyle.SUCCESS))
+    return create_choice_keyboard(*buttons, width=1)
 
 
 def format_date(created_at) -> str:

@@ -7,6 +7,8 @@ from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.infrastructure.services.car_media import make_lot_callback
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,9 +28,7 @@ async def safe_send_media_group(
         return False
 
     button_text = f"📋 Получить детальный расчет Авто № {number}"
-    callback_data = (
-        f"Лот №: {car[0]['Lot number']}-{car[0]['Make']}-{car[0]['Model Detail']}"
-    )
+    callback_data = make_lot_callback(car[0])
     await callback.message.answer(
         text="👇 Нажмите кнопку, чтобы получить расчёт цены под ключ в РБ:",
         reply_markup=InlineKeyboardMarkup(

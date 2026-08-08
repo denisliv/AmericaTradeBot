@@ -6,6 +6,10 @@ from aiogram.types import CallbackQuery
 
 from app.bot.handlers.consultation_request import set_lead_context
 from app.bot.keyboards.keyboards_inline import create_self_lead_keyboard
+from app.infrastructure.services.car_media import (
+    LOT_CALLBACK_PREFIX,
+    parse_lot_callback,
+)
 from app.lexicon.lexicon_ru import LEXICON_RU
 
 router = Router()
@@ -14,12 +18,9 @@ router = Router()
 # Этот хэндлер будет срабатывать на кнопку "📋 Получить детальный расчет Авто № N":
 # помечает выбранную карточку и показывает экран запроса телефона последним
 # сообщением; выбранное авто уходит в комментарий Bitrix-лида
-@router.callback_query(F.data.startswith("Лот №:"))
+@router.callback_query(F.data.startswith(LOT_CALLBACK_PREFIX))
 async def process_auto_press(callback: CallbackQuery, state: FSMContext):
-    # Формат callback: "Лот №: {lot}-{Make}-{Model Detail}"
-    lot_description = callback.data.split("-")
-    lot_number = lot_description[0][7:]
-    car_title = " ".join(lot_description[1:])
+    lot_number, car_title = parse_lot_callback(callback.data)
 
     data = await state.get_data()
     # Нажатая кнопка заменяется отметкой выбора, экран телефона приходит

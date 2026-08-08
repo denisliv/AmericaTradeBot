@@ -15,6 +15,7 @@ from app.bot.handlers.assisted_selection import assisted_selection_router
 from app.bot.handlers.consultation_request import consultation_request_router
 from app.bot.handlers.others import others_router
 from app.bot.handlers.self_selection import self_selection_router
+from app.bot.handlers.step_back import step_back_router
 from app.bot.handlers.subscriptions import subscriptions_router
 from app.bot.handlers.users import user_router
 from app.bot.middlewares.activity_tracker import ActivityTrackerMiddleware
@@ -91,6 +92,8 @@ async def main(config: Config) -> None:
     # Подключаем роутеры в нужном порядке
     logger.info("Including routers...")
     dp.include_routers(
+        # Первым: хэндлеры шагов подбора ловят в своем состоянии любой callback
+        step_back_router,
         user_router,
         self_selection_router,
         assisted_selection_router,

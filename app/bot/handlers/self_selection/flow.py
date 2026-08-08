@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from psycopg.connection_async import AsyncConnection
 
-from app.bot.callback_data import SubscribeCB
+from app.bot.callback_data import STEP_BACK_PREFIX, SubscribeCB
 from app.bot.handlers.consultation_request import set_lead_context
 from app.bot.keyboards.keyboards_inline import (
     create_choice_keyboard,
@@ -34,13 +34,89 @@ _ANY_ODOMETER = "Не имеет значения"
 
 def _create_brand_keyboard():
     return create_choice_keyboard(
-        *LEXICON_FORM_BUTTONS_RU["brand_buttons"], "manual_option_button", width=2
+        *LEXICON_FORM_BUTTONS_RU["brand_buttons"],
+        "manual_option_button",
+        (f"{STEP_BACK_PREFIX}start", "back_button"),
+        width=2,
     )
 
 
-async def _prompt_manual_request(callback: CallbackQuery, state: FSMContext) -> None:
-    """Кнопка "Другое": просим описать запрос свободным текстом."""
-    await callback.message.edit_text(text=LEXICON_RU["manual_request_text"])
+async def show_brand_step(message: Message, state: FSMContext) -> None:
+    """Screen "выберите марку" - the first step of the brand/model branch."""
+    await message.edit_text(
+        text="Выберите марку автомобиля:",
+        reply_markup=_create_brand_keyboard(),
+    )
+    await state.set_state(FSMFillSelfSelectionForm.get_brand)
+
+
+async def show_model_step(message: Message, state: FSMContext, brand: str) -> None:
+    """Screen "выберите модель" for the given brand."""
+    model_buttons = LEXICON_FORM_BUTTONS_RU["model_buttons"][brand]
+    model_entries = [
+        ("ALL MODELS", "any_model_button") if model == "ALL MODELS" else model
+        for model in model_buttons
+    ]
+    await message.edit_text(
+        text="Выберите модель автомобиля:",
+        reply_markup=create_choice_keyboard(
+            *model_entries,
+            "manual_option_button",
+            (f"{STEP_BACK_PREFIX}brand", "back_button"),
+            width=2,
+        ),
+    )
+    await state.update_data(brand=brand)
+    await state.set_state(FSMFillSelfSelectionForm.get_model)
+
+
+async def show_year_step(message: Message, state: FSMContext) -> None:
+    """Screen "выберите год выпуска"."""
+    await message.edit_text(
+        text="Выберите год выпуска автомобиля:",
+        reply_markup=create_choice_keyboard(
+            *LEXICON_FORM_BUTTONS_RU["year_buttons"],
+            (f"{STEP_BACK_PREFIX}model", "back_button"),
+            width=1,
+        ),
+    )
+    await state.set_state(FSMFillSelfSelectionForm.get_year)
+
+
+async def show_auction_status_step(message: Message, state: FSMContext) -> None:
+    """Screen "какие варианты хотели бы увидеть" - BUY NOW or everything."""
+    await message.edit_text(
+        text="Какие варианты хотели бы увидеть?",
+        reply_markup=create_choice_keyboard(
+            *(
+                (callback_data, text_key, ButtonStyle.PRIMARY)
+                for callback_data, text_key in LEXICON_FORM_BUTTONS_RU[
+                    "auction_status_buttons"
+                ]
+            ),
+            (f"{STEP_BACK_PREFIX}year", "back_button"),
+            width=1,
+        ),
+    )
+    await state.set_state(FSMFillSelfSelectionForm.get_auction_status)
+
+
+async def _prompt_manual_request(
+    callback: CallbackQuery, state: FSMContext, *, back_target: str
+) -> None:
+    """Кнопка "Другое": просим описать запрос свободным текстом.
+
+    Args:
+        callback: Нажатие кнопки "Другое".
+        state: FSM пользователя.
+        back_target: Экран, на который вернет "Назад" (шаг, откуда пришли).
+    """
+    await callback.message.edit_text(
+        text=LEXICON_RU["manual_request_text"],
+        reply_markup=create_choice_keyboard(
+            (f"{STEP_BACK_PREFIX}{back_target}", "back_button"), width=1
+        ),
+    )
     await callback.answer()
     await state.set_state(FSMFillSelfSelectionForm.get_manual_request)
 
@@ -54,12 +130,8 @@ async def process_new_search_button_press(
     state: FSMContext,
 ):
     await state.clear()
-    await callback.message.edit_text(
-        text="Выберите марку автомобиля:",
-        reply_markup=_create_brand_keyboard(),
-    )
+    await show_brand_step(callback.message, state)
     await callback.answer()
-    await state.set_state(FSMFillSelfSelectionForm.get_brand)
 
 
 @router.callback_query(StateFilter(FSMFillSelfSelectionForm.get_brand))
@@ -68,40 +140,18 @@ async def process_brand_button_press(
     state: FSMContext,
 ):
     if callback.data == "manual_option_button":
-        await _prompt_manual_request(callback, state)
+        await _prompt_manual_request(callback, state, back_target="brand")
         return
 
-    model_buttons = LEXICON_FORM_BUTTONS_RU["model_buttons"].get(callback.data)
-    if model_buttons is None:
+    if callback.data not in LEXICON_FORM_BUTTONS_RU["model_buttons"]:
         await callback.answer(
             "Марка не найдена, выберите вариант из списка", show_alert=True
         )
-        await callback.message.edit_text(
-            text="Выберите марку автомобиля:",
-            reply_markup=_create_brand_keyboard(),
-        )
-        await state.set_state(FSMFillSelfSelectionForm.get_brand)
+        await show_brand_step(callback.message, state)
         return
 
-    await callback.answer(
-        text="""При выборе объема двигателя учитывайте,
-что на данный момент в связи с введенными санкциями,
-авто с объемом до 1.9 доставляются через Клайпеду (Литва),
-а авто объемом выше 1.9 - через Поти (Грузия)""",
-        show_alert=True,
-    )
-    model_entries = [
-        ("ALL MODELS", "any_model_button") if model == "ALL MODELS" else model
-        for model in model_buttons
-    ]
-    await callback.message.edit_text(
-        text="Выберите модель автомобиля:",
-        reply_markup=create_choice_keyboard(
-            *model_entries, "manual_option_button", width=2
-        ),
-    )
-    await state.update_data(brand=callback.data)
-    await state.set_state(FSMFillSelfSelectionForm.get_model)
+    await callback.answer()
+    await show_model_step(callback.message, state, callback.data)
 
 
 @router.callback_query(StateFilter(FSMFillSelfSelectionForm.get_model))
@@ -110,22 +160,12 @@ async def process_model_button_press(
     state: FSMContext,
 ):
     if callback.data == "manual_option_button":
-        await _prompt_manual_request(callback, state)
+        await _prompt_manual_request(callback, state, back_target="model")
         return
 
-    await callback.answer(
-        text="""Наиболее выгодными предложениями для покупки авто из-за границы
-являются варианты 2021-2023 годов выпуска (от 3 до 5 лет)""",
-        show_alert=True,
-    )
-    await callback.message.edit_text(
-        text="Выберите год выпуска автомобиля:",
-        reply_markup=create_choice_keyboard(
-            *LEXICON_FORM_BUTTONS_RU["year_buttons"], width=1
-        ),
-    )
+    await callback.answer()
     await state.update_data(model=callback.data)
-    await state.set_state(FSMFillSelfSelectionForm.get_year)
+    await show_year_step(callback.message, state)
 
 
 @router.callback_query(StateFilter(FSMFillSelfSelectionForm.get_year))
@@ -152,20 +192,8 @@ async def process_year_button_press(callback: CallbackQuery, state: FSMContext):
         await state.set_state(None)
         return
 
-    await callback.message.edit_text(
-        text="Какие варианты хотели бы увидеть?",
-        reply_markup=create_choice_keyboard(
-            *(
-                (callback_data, text_key, ButtonStyle.PRIMARY)
-                for callback_data, text_key in LEXICON_FORM_BUTTONS_RU[
-                    "auction_status_buttons"
-                ]
-            ),
-            width=1,
-        ),
-    )
+    await show_auction_status_step(callback.message, state)
     await callback.answer()
-    await state.set_state(FSMFillSelfSelectionForm.get_auction_status)
 
 
 @router.callback_query(
@@ -229,7 +257,8 @@ async def process_auction_status_button_press(
 
     await callback.message.answer(
         text=LEXICON_RU["cars_describe_text"],
-        reply_markup=create_self_results_keyboard(else_car=len(data) > 0),
+        # Первые 3 лота уже показаны: кнопка нужна, только если есть остаток
+        reply_markup=create_self_results_keyboard(else_car=len(data) > 3),
     )
 
 

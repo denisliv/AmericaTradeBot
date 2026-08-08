@@ -24,7 +24,7 @@ from app.infrastructure.database.nurture import (
     set_nurture_last_step,
 )
 from app.infrastructure.paths import WARM_UP_POSTS_IMG_DIR
-from app.infrastructure.services.car_media import make_media_group
+from app.infrastructure.services.car_media import make_lot_callback, make_media_group
 from app.infrastructure.services.safe_send import SendStatus, send_to_user_safely
 from app.infrastructure.services.salesdata import get_random_car_with_images
 from app.lexicon.lexicon_ru import (
@@ -159,10 +159,7 @@ async def _send_top_car_post(
                 [
                     InlineKeyboardButton(
                         text="📋 Получить детальный расчет Авто № 1",
-                        callback_data=(
-                            f"Лот №: {car[0]['Lot number']}"
-                            f"-{car[0]['Make']}-{car[0]['Model Detail']}"
-                        ),
+                        callback_data=make_lot_callback(car[0]),
                         style=ButtonStyle.PRIMARY,
                     )
                 ]

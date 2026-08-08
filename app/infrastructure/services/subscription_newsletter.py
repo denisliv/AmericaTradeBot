@@ -10,12 +10,27 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.infrastructure.database.selections import get_user_subscriptions
 from app.infrastructure.database.users import get_active_subscribers
-from app.infrastructure.services.car_media import make_media_group
+from app.infrastructure.services.car_media import make_lot_callback, make_media_group
 from app.infrastructure.services.safe_send import SendStatus, send_to_user_safely
 from app.infrastructure.services.salesdata import get_data
 from app.lexicon.lexicon_ru import LEXICON_BUTTONS_RU, LEXICON_NEWSLETTER_RU, LEXICON_RU
 
 logger = logging.getLogger(__name__)
+
+
+def build_selection_request_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка заявки на подбор под сообщениями рассылки."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=LEXICON_BUTTONS_RU["application_for_selection_button"],
+                    callback_data="application_for_selection_button",
+                    style=ButtonStyle.SUCCESS,
+                )
+            ]
+        ]
+    )
 
 
 async def send_self_selection_cars(
@@ -25,9 +40,11 @@ async def send_self_selection_cars(
 ) -> int:
     """Отправляет автомобили для self selection подписки с фото и кнопками"""
     if not cars_data:
+        # Текст зовет оставить заявку, поэтому кнопка идет вместе с ним
         await bot.send_message(
             chat_id=subscriber.user_id,
             text=f"{LEXICON_RU['nothing_found_text']}",
+            reply_markup=build_selection_request_keyboard(),
         )
         return 0
 
@@ -58,11 +75,7 @@ async def send_self_selection_cars(
                         [
                             InlineKeyboardButton(
                                 text=f"Авто № {i}",
-                                callback_data=(
-                                    f"Лот №: {car.get('Lot number', 'N/A')}"
-                                    f"-{car.get('Make', 'N/A')}"
-                                    f"-{car.get('Model Detail', 'N/A')}"
-                                ),
+                                callback_data=make_lot_callback(car),
                                 style=ButtonStyle.PRIMARY,
                             )
                         ]
@@ -87,17 +100,7 @@ async def send_self_selection_cars(
         await bot.send_message(
             chat_id=subscriber.user_id,
             text=LEXICON_NEWSLETTER_RU["car_selection_text"],
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=LEXICON_BUTTONS_RU["application_for_selection_button"],
-                            callback_data="application_for_selection_button",
-                            style=ButtonStyle.SUCCESS,
-                        )
-                    ]
-                ]
-            ),
+            reply_markup=build_selection_request_keyboard(),
         )
         messages_sent += 1
 

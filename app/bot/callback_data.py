@@ -1,5 +1,8 @@
 from aiogram.filters.callback_data import CallbackData
 
+# Кнопка "Назад" на шагах подбора: step_back:<экран, на который возвращаемся>
+STEP_BACK_PREFIX = "step_back:"
+
 
 class SubscribeCB(CallbackData, prefix="sub_new"):
     source: str

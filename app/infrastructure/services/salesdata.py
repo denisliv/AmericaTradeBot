@@ -34,6 +34,8 @@ REQUIRED_SALESDATA_COLUMNS = (
     "Transmission",
     "Fuel Type",
     "Image URL",
+    "Damage Description",
+    "Trim",
 )
 
 
@@ -74,13 +76,46 @@ async def get_images(
     return urls[:max_images]
 
 
+# Copart обрезает "Model Group" до 10 символов ("GRAND CHER" от GRAND CHEROKEE),
+# поэтому у такой длины префикс сравнивается без границы слова.
+_TRUNCATED_MODEL_LENGTH = 10
+
+
+def _model_matches(row: dict, model: str) -> bool:
+    """Whether the row belongs to the requested model.
+
+    Exact equality is not enough: Copart splits one model across several
+    "Model Group" values ("TAOS", "TAOS SE", "TAOS SEL") and dumps the rest into
+    "ALL OTHER", keeping the real name in "Model Detail". Matching by word
+    boundary keeps unrelated models apart: "M3" must not catch "M340I".
+
+    Args:
+        row: Sales data row.
+        model: Model as written on the button.
+
+    Returns:
+        True if the row should be shown for this model.
+    """
+    if model == "ALL MODELS":
+        return True
+
+    prefix = f"{model} "
+    for column in ("Model Group", "Model Detail"):
+        value = (row.get(column) or "").strip()
+        if value == model or value.startswith(prefix):
+            return True
+
+    if len(model) == _TRUNCATED_MODEL_LENGTH:
+        return (row.get("Model Detail") or "").strip().startswith(model)
+    return False
+
+
 # Базовый фильтр по марке/модели/году
 def filter_by_make_and_model(row: dict, brand: str, model: str, year: tuple) -> bool:
     try:
-        model_matches = model == "ALL MODELS" or row["Model Group"] == model
         return (
             row["Make"] == brand
-            and model_matches
+            and _model_matches(row, model)
             and year[0] <= int(row["Year"]) <= year[1]
             and row["Sale Date M/D/CY"] != "0"
         )
