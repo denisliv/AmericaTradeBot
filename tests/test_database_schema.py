@@ -7,11 +7,19 @@ def _read_migration(name: str) -> str:
     return (_VERSIONS_DIR / name).read_text(encoding="utf-8")
 
 
-def test_single_init_migration():
-    migrations = [
+def test_only_the_expected_migrations_exist():
+    migrations = sorted(
         p.name for p in _VERSIONS_DIR.glob("*.py") if not p.name.startswith("__")
-    ]
-    assert migrations == ["0001_initial_schema.py"]
+    )
+    assert migrations == ["0001_initial_schema.py", "0002_sales_lot.py"]
+
+
+def test_sales_lot_migration_creates_the_snapshot_and_its_indexes():
+    ddl = _read_migration("0002_sales_lot.py")
+
+    assert "CREATE TABLE sales_lot" in ddl
+    assert "idx_sales_lot_make_year" in ddl
+    assert "idx_sales_lot_nurture" in ddl
 
 
 def test_init_schema_creates_actual_tables_only():

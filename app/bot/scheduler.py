@@ -149,7 +149,7 @@ class SchedulerManager:
     async def _download_csv_wrapper(self, url: str) -> None:
         await self._run_with_lock(
             "lock:download_csv",
-            download_csv(url),
+            download_csv(url, self._db_pool),
             lock_ttl_seconds=3600,
         )
 

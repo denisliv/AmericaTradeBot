@@ -227,7 +227,7 @@ async def process_auction_status_button_press(
     # brand/model/year остаются в данных FSM: они нужны для контекста Bitrix-лида
     await state.set_state(None)
 
-    data = await get_data(user_dict=user_dict, count=10)
+    data = await get_data(user_dict=user_dict, conn=conn, count=10)
     if not data:
         await callback.message.answer(
             text=LEXICON_RU["nothing_found_text"],

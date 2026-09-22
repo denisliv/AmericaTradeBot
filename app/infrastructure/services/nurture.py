@@ -16,6 +16,7 @@ from aiogram import Bot
 from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from app.bot.keyboards.keyboards_inline import create_choice_keyboard
@@ -133,10 +134,10 @@ async def _send_photo_post(
 
 
 async def _send_top_car_post(
-    bot: Bot, user_id: int, first_name: str, body_group: str
+    bot: Bot, user_id: int, first_name: str, body_group: str, conn: AsyncConnection
 ) -> None:
-    """Пост-подборка одного кузова: картинка-заголовок, авто из CSV, кнопки."""
-    car = await get_random_car_with_images(body_group)
+    """Пост-подборка одного кузова: картинка-заголовок, авто из базы, кнопки."""
+    car = await get_random_car_with_images(conn, body_group)
     if not car:
         # Редкий случай (нет подходящих лотов с фото): пост пропускается
         logger.warning("Nurture top cars: no %s with images found", body_group)
@@ -175,7 +176,7 @@ async def _send_top_car_post(
 
 
 async def send_nurture_step(
-    bot: Bot, user_id: int, first_name: str, content_step: int
+    bot: Bot, user_id: int, first_name: str, content_step: int, conn: AsyncConnection
 ) -> None:
     if content_step == 1:
         await _send_photo_post(
@@ -194,9 +195,9 @@ async def send_nurture_step(
             reply_markup=_consultation_keyboard(),
         )
     elif content_step == 3:
-        await _send_top_car_post(bot, user_id, first_name, "suv")
+        await _send_top_car_post(bot, user_id, first_name, "suv", conn)
     elif content_step == 4:
-        await _send_top_car_post(bot, user_id, first_name, "sedan")
+        await _send_top_car_post(bot, user_id, first_name, "sedan", conn)
     elif content_step == 5:
         await _send_photo_post(
             bot,
@@ -266,6 +267,7 @@ async def send_due_nurture_messages(
                         row.user_id,
                         row.name or "Пользователь",
                         content_step,
+                        conn,
                     ),
                     conn=conn,
                     user_id=row.user_id,

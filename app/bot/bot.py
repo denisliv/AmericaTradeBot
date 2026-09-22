@@ -27,6 +27,7 @@ from app.bot.middlewares.throttling import ThrottlingMiddleware
 from app.bot.scheduler import create_scheduler
 from app.config import Config
 from app.infrastructure.database.connection import get_pg_pool
+from app.infrastructure.services.salesdata import ensure_snapshot_loaded
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,10 @@ async def main(config: Config) -> None:
         max_size=config.db.pool_max_size,
     )
     # DDL schema управляется Alembic: `alembic upgrade head` перед запуском.
+
+    # Снимок Copart живёт в базе, а джоб загрузки сработает только через
+    # интервал: без этого подбор час отвечал бы «нет вариантов».
+    await ensure_snapshot_loaded(db_pool)
 
     # Создаем и настраиваем планировщик
     scheduler_manager = create_scheduler(config, bot, db_pool, redis)

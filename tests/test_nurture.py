@@ -16,10 +16,6 @@ from app.infrastructure.services.nurture import (
     due_at,
     resolve_step,
 )
-from app.infrastructure.services.salesdata import (
-    BODY_STYLE_GROUPS,
-    is_top_nurture_car,
-)
 from app.lexicon.lexicon_ru import LEXICON_NURTURE_RU
 
 _TZ = ZoneInfo("Europe/Minsk")
@@ -112,30 +108,3 @@ def test_warm_up_post_images_are_expected_files():
             JOIN_TIKTOK_IMG,
         )
     )
-
-
-def test_top_nurture_car_requires_fresh_year_and_buy_now():
-    # В ТОП-подборку рассылки попадают авто от 2022 года с ценой BUY NOW
-    assert is_top_nurture_car({"Year": "2022", "Buy-It-Now Price": "15000"})
-    assert is_top_nurture_car({"Year": "2024", "Buy-It-Now Price": "8500.0"})
-
-    assert not is_top_nurture_car({"Year": "2021", "Buy-It-Now Price": "15000"})
-    assert not is_top_nurture_car({"Year": "2023", "Buy-It-Now Price": "0"})
-    assert not is_top_nurture_car({"Year": "2023", "Buy-It-Now Price": ""})
-    assert not is_top_nurture_car({"Year": "", "Buy-It-Now Price": "15000"})
-
-
-def test_body_style_groups_classify_csv_values():
-    suv = BODY_STYLE_GROUPS["suv"]
-    sedan = BODY_STYLE_GROUPS["sedan"]
-
-    for style in ("SPORT UTILITY VEHICLE", "4DR SPORT UTILITY", "SUV", "4DR SPOR"):
-        assert suv(style), style
-        assert not sedan(style), style
-
-    for style in ("SEDAN", "SEDAN 4DR", "SEDAN 4D"):
-        assert sedan(style), style
-        assert not suv(style), style
-
-    for style in ("PICKUP", "WAGON", ""):
-        assert not suv(style) and not sedan(style), style

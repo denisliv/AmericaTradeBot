@@ -58,7 +58,7 @@ async def test_download_csv_wrapper_uses_redis_lock(monkeypatch):
     manager = make_manager(fake_redis)
     calls = []
 
-    async def fake_download_csv(url):
+    async def fake_download_csv(url, db_pool):
         calls.append(url)
 
     monkeypatch.setattr("app.bot.scheduler.download_csv", fake_download_csv)

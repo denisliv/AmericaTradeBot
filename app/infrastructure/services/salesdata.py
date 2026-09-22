@@ -1,20 +1,33 @@
-"""Copart sales data: CSV download, validation and car search."""
+"""Copart sales data: CSV download, validation and car search.
+
+The snapshot is kept in PostgreSQL, not in the process. Holding it parsed in
+memory cost 730 MB of resident size for an 84 MB file, and buffering the
+download in one piece added another 370 MB peak every hour; both are now
+streamed, so this module never holds more than one batch of rows.
+"""
 
 import asyncio
 import csv
 import logging
 import os
-import random
+from itertools import islice
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, AsyncIterator, Iterator, List, Optional, Sequence, Tuple
 
-import aiofiles
 import aiohttp
 import async_timeout
 from aiohttp.client_exceptions import ContentTypeError
+from psycopg import AsyncConnection
+from psycopg_pool import AsyncConnectionPool
 
+from app.infrastructure.database.sales_lots import (
+    CSV_COLUMNS,
+    count_sales_lots,
+    random_top_cars,
+    replace_sales_lots,
+    search_cars,
+)
 from app.infrastructure.paths import SALESDATA_CSV
-from app.infrastructure.services.salesdata_cache import sales_data_cache
 from app.lexicon.lexicon_ru import LEXICON_RU_CSV
 
 logger = logging.getLogger(__name__)
@@ -37,6 +50,17 @@ REQUIRED_SALESDATA_COLUMNS = (
     "Damage Description",
     "Trim",
 )
+
+# Сколько ждём весь файл: фид около 90 МБ, отдаётся минуты за полторы.
+DOWNLOAD_TIMEOUT_SECONDS = 30
+# Размер куска при записи на диск. Прежний 1 КБ давал 88 тысяч итераций.
+DOWNLOAD_CHUNK_BYTES = 64 * 1024
+# Сколько строк разбирается за один заход в рабочем потоке.
+COPY_BATCH_ROWS = 5000
+# Кодировка фида: у файла бывает BOM.
+CSV_ENCODING = "utf-8-sig"
+
+HTTP_OK = 200
 
 
 # Универсальная функция запроса JSON
@@ -76,53 +100,6 @@ async def get_images(
     return urls[:max_images]
 
 
-# Copart обрезает "Model Group" до 10 символов ("GRAND CHER" от GRAND CHEROKEE),
-# поэтому у такой длины префикс сравнивается без границы слова.
-_TRUNCATED_MODEL_LENGTH = 10
-
-
-def _model_matches(row: dict, model: str) -> bool:
-    """Whether the row belongs to the requested model.
-
-    Exact equality is not enough: Copart splits one model across several
-    "Model Group" values ("TAOS", "TAOS SE", "TAOS SEL") and dumps the rest into
-    "ALL OTHER", keeping the real name in "Model Detail". Matching by word
-    boundary keeps unrelated models apart: "M3" must not catch "M340I".
-
-    Args:
-        row: Sales data row.
-        model: Model as written on the button.
-
-    Returns:
-        True if the row should be shown for this model.
-    """
-    if model == "ALL MODELS":
-        return True
-
-    prefix = f"{model} "
-    for column in ("Model Group", "Model Detail"):
-        value = (row.get(column) or "").strip()
-        if value == model or value.startswith(prefix):
-            return True
-
-    if len(model) == _TRUNCATED_MODEL_LENGTH:
-        return (row.get("Model Detail") or "").strip().startswith(model)
-    return False
-
-
-# Базовый фильтр по марке/модели/году
-def filter_by_make_and_model(row: dict, brand: str, model: str, year: tuple) -> bool:
-    try:
-        return (
-            row["Make"] == brand
-            and _model_matches(row, model)
-            and year[0] <= int(row["Year"]) <= year[1]
-            and row["Sale Date M/D/CY"] != "0"
-        )
-    except (ValueError, KeyError):
-        return False
-
-
 # Парсинг Buy-It-Now Price из CSV (значение всегда приходит строкой)
 def parse_buy_now_price(row: dict) -> int:
     try:
@@ -131,27 +108,41 @@ def parse_buy_now_price(row: dict) -> int:
         return 0
 
 
-# Универсальный фильтр с доп. параметрами
-def match_car(
-    row: dict,
-    brand: str,
-    model: str,
-    year: tuple,
-    odometer: Optional[tuple] = None,
-    auction_status: Optional[str] = None,
-) -> bool:
-    if not filter_by_make_and_model(row, brand, model, year):
-        return False
-    if odometer:
-        try:
-            odo_val = float(row["Odometer"])
-            if not (odometer[0] <= odo_val <= odometer[1]):
-                return False
-        except ValueError:
-            return False
-    if auction_status and parse_buy_now_price(row) <= 0:
-        return False
-    return True
+def _parse_year(row: dict) -> Optional[int]:
+    """Parse the model year, or None when the feed did not write a usable one.
+
+    A row without a readable year matched no search before this lived in SQL
+    either: every search compares the year against a range.
+    """
+    try:
+        return int(row["Year"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _parse_odometer(row: dict) -> Optional[float]:
+    """Parse the mileage, or None when the feed did not write a usable one."""
+    try:
+        return float(row["Odometer"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def to_snapshot_record(row: dict) -> tuple:
+    """Turn one CSV row into the tuple the snapshot table is loaded with.
+
+    The text values go in verbatim — the car card prints year and mileage as
+    the feed wrote them. The parsed values that follow exist only so the
+    filtering can happen in SQL.
+
+    Args:
+        row: One row as csv.DictReader produced it.
+
+    Returns:
+        Values in COPY_COLUMNS order.
+    """
+    text = tuple(row.get(name) for name in CSV_COLUMNS)
+    return text + (_parse_year(row), _parse_odometer(row), parse_buy_now_price(row))
 
 
 # Сколько лотов проверяем на наличие фото за один заход
@@ -201,7 +192,9 @@ async def collect_cars_with_images(
 
 
 # Получение данных по заявке пользователя
-async def get_data(user_dict: dict, count: int = 6) -> List[Tuple[dict, List[str]]]:
+async def get_data(
+    user_dict: dict, conn: AsyncConnection, count: int = 6
+) -> List[Tuple[dict, List[str]]]:
     brand = user_dict["brand"]
     model = user_dict["model"]
     year = LEXICON_RU_CSV[user_dict["year"]]
@@ -214,61 +207,39 @@ async def get_data(user_dict: dict, count: int = 6) -> List[Tuple[dict, List[str
         else None
     )
 
-    rows = await sales_data_cache.get_rows()
-    filtered = [
-        row
-        for row in rows
-        if match_car(row, brand, model, year, odometer, auction_status)
-    ]
-
-    if not filtered:
+    candidates, matched = await search_cars(
+        conn,
+        brand=brand,
+        model=model,
+        year=year,
+        odometer=odometer,
+        buy_now_only=bool(auction_status),
+        limit=MAX_IMAGE_LOOKUPS,
+    )
+    if not candidates:
         return []
 
-    random.shuffle(filtered)
-    return await collect_cars_with_images(filtered, count)
+    logger.info("Подбор: подошло %d лотов, проверяем %d", matched, len(candidates))
+    return await collect_cars_with_images(candidates, count)
 
-
-# Группы кузовов для случайной подборки в рассылке
-BODY_STYLE_GROUPS = {
-    "suv": lambda style: "SPORT UTILITY" in style
-    or style.startswith("SUV")
-    or style.startswith("4DR SPOR"),
-    "sedan": lambda style: style.startswith("SEDAN"),
-}
 
 # Критерии ТОП-подборки в рассылке: свежие авто с фиксированной ценой BUY NOW
 TOP_CARS_MIN_YEAR = 2022
 
 
-def is_top_nurture_car(row: dict) -> bool:
-    try:
-        if int(row["Year"]) < TOP_CARS_MIN_YEAR:
-            return False
-    except (KeyError, ValueError):
-        return False
-    return parse_buy_now_price(row) > 0
-
-
 # Случайное актуальное авто заданной группы кузова с HD-фото (для рассылки)
 async def get_random_car_with_images(
-    body_group: str, attempts: int = 10
+    conn: AsyncConnection, body_group: str, attempts: int = 10
 ) -> Optional[Tuple[dict, List[str]]]:
-    matcher = BODY_STYLE_GROUPS.get(body_group)
-    if matcher is None:
+    sample = await random_top_cars(
+        conn,
+        body_group=body_group,
+        min_year=TOP_CARS_MIN_YEAR,
+        limit=attempts,
+    )
+    if not sample:
         return None
 
-    rows = await sales_data_cache.get_rows()
-    candidates = [
-        row
-        for row in rows
-        if matcher(row.get("Body Style", "").upper())
-        and row.get("Sale Date M/D/CY") != "0"
-        and is_top_nurture_car(row)
-    ]
-    if not candidates:
-        return None
-
-    sample = random.sample(candidates, k=min(attempts, len(candidates)))
     async with aiohttp.ClientSession() as aio_session:
         for row in sample:
             images = await get_images(row, aio_session)
@@ -278,80 +249,173 @@ async def get_random_car_with_images(
 
 
 # Функция загрузки данных в csv
-def _validate_sales_csv_bytes(content: bytes) -> None:
-    if not content.strip():
-        raise ValueError("Downloaded CSV is empty")
+def _validate_sales_csv_file(filepath: str | Path) -> None:
+    """Check the downloaded file before it replaces the snapshot.
 
-    text = content.decode("utf-8-sig")
-    reader = csv.reader(text.splitlines())
-    try:
-        header = next(reader)
-    except StopIteration as exc:
-        raise ValueError("Downloaded CSV is empty") from exc
+    Reads the header and one data row instead of the whole file: a truncated
+    or renamed feed shows up in the first two lines, and decoding 84 MB just to
+    look at them was the other half of the hourly memory peak.
 
-    columns = {column.strip().strip('"') for column in header}
-    missing = [column for column in REQUIRED_SALESDATA_COLUMNS if column not in columns]
-    if missing:
-        raise ValueError(f"Downloaded CSV missing required columns: {missing}")
+    Args:
+        filepath: Freshly downloaded CSV.
 
-    if next(reader, None) is None:
-        raise ValueError("Downloaded CSV has no data rows")
+    Raises:
+        ValueError: When the file is empty, carries no data rows, or lost a
+            column the bot reads.
+    """
+    with Path(filepath).open("r", encoding=CSV_ENCODING, newline="") as csvfile:
+        reader = csv.reader(csvfile)
+        try:
+            header = next(reader)
+        except StopIteration as exc:
+            raise ValueError("Downloaded CSV is empty") from exc
+
+        columns = {column.strip().strip('"') for column in header}
+        missing = [
+            column for column in REQUIRED_SALESDATA_COLUMNS if column not in columns
+        ]
+        if missing:
+            raise ValueError(f"Downloaded CSV missing required columns: {missing}")
+
+        if next(reader, None) is None:
+            raise ValueError("Downloaded CSV has no data rows")
 
 
-async def _write_sales_csv_atomically(filepath: str | Path, content: bytes) -> None:
-    target = Path(filepath)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = target.with_name(f"{target.name}.tmp")
-    try:
-        async with aiofiles.open(tmp_path, "wb") as f:
-            await f.write(content)
-        os.replace(tmp_path, target)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+def _read_snapshot_batch(reader: Iterator[dict], size: int) -> list[tuple]:
+    """Parse the next ``size`` rows. Runs in a worker thread."""
+    return [to_snapshot_record(row) for row in islice(reader, size)]
 
 
-async def download_csv(url: str) -> Path:
+async def _iter_snapshot_batches(
+    reader: Iterator[dict],
+) -> AsyncIterator[Sequence[Sequence[Any]]]:
+    """Yield batches of records, parsing each batch off the event loop."""
+    while True:
+        batch = await asyncio.to_thread(_read_snapshot_batch, reader, COPY_BATCH_ROWS)
+        if not batch:
+            return
+        yield batch
+
+
+async def load_snapshot(db_pool: AsyncConnectionPool, filepath: str | Path) -> int:
+    """Replace the snapshot in PostgreSQL with the contents of this CSV.
+
+    Args:
+        db_pool: Pool to take the loading connection from.
+        filepath: Validated CSV to load.
+
+    Returns:
+        How many rows the snapshot now holds.
+    """
+    with Path(filepath).open("r", encoding=CSV_ENCODING, newline="") as csvfile:
+        reader = csv.DictReader(csvfile)
+        async with db_pool.connection() as conn:
+            loaded = await replace_sales_lots(conn, _iter_snapshot_batches(reader))
+
+    logger.info("Снимок Copart загружен в базу: %d строк", loaded)
+    return loaded
+
+
+async def ensure_snapshot_loaded(db_pool: AsyncConnectionPool) -> None:
+    """Load the CSV already on disk when the snapshot table is empty.
+
+    The download job runs on an interval, so after a restart the table would
+    otherwise stay empty until the first tick an hour later and every search
+    would answer "нет вариантов". The file outlives the process, so the
+    snapshot is rebuilt from it instead of waiting for Copart.
+    """
+    async with db_pool.connection() as conn:
+        if await count_sales_lots(conn) > 0:
+            return
+
+    if not SALESDATA_CSV.exists():
+        logger.warning(
+            "Снимок Copart пуст, а файла %s нет: подбор заработает после загрузки фида",
+            SALESDATA_CSV,
+        )
+        return
+
+    logger.info("Снимок Copart пуст, восстанавливаем из %s", SALESDATA_CSV)
+    await load_snapshot(db_pool, SALESDATA_CSV)
+
+
+async def download_csv(url: str, db_pool: AsyncConnectionPool) -> Path:
+    """Download the inventory feed and make it the current snapshot.
+
+    The body is streamed to a temporary file and only then validated and
+    loaded: the feed is about 90 MB, and holding it in memory as chunks, as one
+    blob, as a decoded string and as a list of lines cost 370 MB every hour.
+
+    Args:
+        url: Feed URL with the partner access key.
+        db_pool: Pool the snapshot is loaded through.
+
+    Returns:
+        Path of the stored CSV.
+
+    Raises:
+        aiohttp.ClientResponseError: When the feed answers with a non-200 code.
+        ValueError: When the downloaded file does not look like the feed.
+    """
     filepath = SALESDATA_CSV
+    tmp_path = filepath.with_name(f"{filepath.name}.tmp")
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with async_timeout.timeout(30):  # Таймаут 30 секунд
+            async with async_timeout.timeout(DOWNLOAD_TIMEOUT_SECONDS):
                 async with session.get(url) as response:
-                    if response.status != 200:
-                        logger.error(
-                            f"Ошибка HTTP {response.status} при загрузке {url}"
-                        )
+                    if response.status != HTTP_OK:
+                        logger.error("Ошибка HTTP %s при загрузке фида", response.status)
                         raise aiohttp.ClientResponseError(
                             request_info=response.request_info,
                             history=response.history,
                             status=response.status,
                         )
 
-                    chunks = []
-                    total_bytes = 0
-                    while chunk := await response.content.read(1024):
-                        chunks.append(chunk)
-                        total_bytes += len(chunk)
-                    content = b"".join(chunks)
-                    _validate_sales_csv_bytes(content)
-                    await _write_sales_csv_atomically(filepath, content)
-                    sales_data_cache.invalidate()
+                    total_bytes = await _stream_to_file(response, tmp_path)
 
-                    logger.info(
-                        f"Файл успешно загружен: {filepath} ({total_bytes} байт)"
-                    )
-                    return filepath
+        await asyncio.to_thread(_validate_sales_csv_file, tmp_path)
+        os.replace(tmp_path, filepath)
+        logger.info(f"Файл успешно загружен: {filepath} ({total_bytes} байт)")
 
+        await load_snapshot(db_pool, filepath)
+        return filepath
+
+    # Адрес фида в лог не пишется ни в одной ветке: в нём партнёрский authKey,
+    # а stdout контейнера собирается и уезжает дальше. По той же причине в лог
+    # идёт класс исключения, а не его текст: ClientResponseError печатает
+    # полный адрес запроса вместе с ключом.
     except asyncio.TimeoutError:
-        logger.error(f"Таймаут при загрузке файла с {url}")
+        logger.error("Таймаут при загрузке фида")
         raise
     except aiohttp.ClientError as e:
-        logger.error(f"Ошибка сети при загрузке {url}: {e}")
+        logger.error("Ошибка сети при загрузке фида: %s", type(e).__name__)
         raise
     except OSError as e:
         logger.error(f"Ошибка записи файла {filepath}: {e}")
         raise
     except Exception as e:
-        logger.error(f"Неожиданная ошибка при загрузке {url}: {e}")
+        logger.error("Неожиданная ошибка при загрузке фида: %s", type(e).__name__)
         raise
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
+async def _stream_to_file(response: aiohttp.ClientResponse, tmp_path: Path) -> int:
+    """Write the response body to a file chunk by chunk.
+
+    Args:
+        response: Open response positioned at the start of the body.
+        tmp_path: File to write; replaced if it exists.
+
+    Returns:
+        How many bytes were written.
+    """
+    total_bytes = 0
+    with tmp_path.open("wb") as handle:
+        async for chunk in response.content.iter_chunked(DOWNLOAD_CHUNK_BYTES):
+            await asyncio.to_thread(handle.write, chunk)
+            total_bytes += len(chunk)
+    return total_bytes

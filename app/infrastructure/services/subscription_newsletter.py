@@ -109,6 +109,7 @@ async def send_self_selection_cars(
 
 async def get_cars_for_self_selection(
     subscription,
+    conn,
 ) -> List[Tuple[dict, List[str]]]:
     """Получает автомобили для self selection подписки"""
     user_dict = {
@@ -119,7 +120,7 @@ async def get_cars_for_self_selection(
         "auction_status": subscription.auction_status,
     }
 
-    cars_data = await get_data(user_dict, count=3)
+    cars_data = await get_data(user_dict, conn, count=3)
     return cars_data
 
 
@@ -223,7 +224,7 @@ async def send_newsletter_to_user(bot: Bot, subscriber, conn) -> tuple[SendStatu
             conn, user_id=subscriber.user_id
         )
         for subscription in self_selection_subs:
-            cars_data = await get_cars_for_self_selection(subscription)
+            cars_data = await get_cars_for_self_selection(subscription, conn)
             await send_self_selection_cars(bot, subscriber, cars_data)
 
     try:
